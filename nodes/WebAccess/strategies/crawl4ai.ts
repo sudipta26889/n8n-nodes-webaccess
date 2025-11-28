@@ -122,8 +122,30 @@ export async function crawl4aiQuery(
 }
 
 /**
+ * Extract hostname from URL for domain filtering
+ */
+function getHostname(url: string): string | null {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Check if a URL belongs to the same domain as the seed URL
+ */
+function isSameDomain(url: string, seedHostname: string): boolean {
+	const urlHostname = getHostname(url);
+	if (!urlHostname) return false;
+
+	// Exact match or subdomain match
+	return urlHostname === seedHostname || urlHostname.endsWith(`.${seedHostname}`);
+}
+
+/**
  * Crawl a website using Crawl4AI /crawl endpoint
- * Returns a list of discovered pages
+ * Returns a list of discovered pages (filtered to same domain as seed URL)
  */
 export async function crawl4aiCrawl(
 	baseUrl: string,
@@ -131,6 +153,13 @@ export async function crawl4aiCrawl(
 	maxPages: number = 100,
 ): Promise<CrawledPage[]> {
 	const endpoint = `${baseUrl.replace(/\/$/, '')}/crawl`;
+
+	// Extract seed domain for filtering
+	const seedHostname = getHostname(targetUrl);
+	if (!seedHostname) {
+		console.error('Invalid target URL for crawling');
+		return [];
+	}
 
 	const config: Crawl4AICrawlConfig = {
 		urls: [targetUrl],
@@ -195,7 +224,7 @@ export async function crawl4aiCrawl(
 
 					try {
 						const data = JSON.parse(line);
-						if (data.url) {
+						if (data.url && isSameDomain(data.url, seedHostname)) {
 							pages.push({
 								url: data.url,
 								title: data.title || data.metadata?.title,
@@ -217,7 +246,7 @@ export async function crawl4aiCrawl(
 			if (buffer.trim()) {
 				try {
 					const data = JSON.parse(buffer);
-					if (data.url && pages.length < maxPages) {
+					if (data.url && isSameDomain(data.url, seedHostname) && pages.length < maxPages) {
 						pages.push({
 							url: data.url,
 							title: data.title || data.metadata?.title,
@@ -238,7 +267,7 @@ export async function crawl4aiCrawl(
 				// Handle array response
 				if (Array.isArray(data)) {
 					for (const item of data) {
-						if (item.url && pages.length < maxPages) {
+						if (item.url && isSameDomain(item.url, seedHostname) && pages.length < maxPages) {
 							pages.push({
 								url: item.url,
 								title: item.title || item.metadata?.title,
@@ -248,7 +277,7 @@ export async function crawl4aiCrawl(
 					}
 				}
 				// Handle single object response
-				else if (data.url) {
+				else if (data.url && isSameDomain(data.url, seedHostname)) {
 					pages.push({
 						url: data.url,
 						title: data.title || data.metadata?.title,
@@ -258,7 +287,7 @@ export async function crawl4aiCrawl(
 				// Handle wrapped response
 				else if (data.results && Array.isArray(data.results)) {
 					for (const item of data.results) {
-						if (item.url && pages.length < maxPages) {
+						if (item.url && isSameDomain(item.url, seedHostname) && pages.length < maxPages) {
 							pages.push({
 								url: item.url,
 								title: item.title || item.metadata?.title,
