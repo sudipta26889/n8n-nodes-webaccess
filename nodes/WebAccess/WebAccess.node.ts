@@ -1356,6 +1356,8 @@ export class WebAccess implements INodeType {
 				name: 'useAI',
 				type: 'boolean',
 				default: false,
+				required: false,
+				noDataExpression: true,
 				description: 'Whether to allow LLM-based extraction as a last resort when other methods fail',
 			},
 			// AI Provider (shown when useAI is true)
