@@ -47,8 +47,8 @@ export function buildSystemPrompt(): string {
 1. Think step-by-step before taking action
 2. Don't repeat actions that were already tried
 3. Use the simplest approach that works
-4. When you have enough information, call complete() immediately
-5. Be concise but thorough in your final answer
+4. When you have enough information, call complete() with your answer
+5. CRITICAL: When calling complete(), you MUST provide a detailed, useful answer in the "result" parameter. Never leave it empty.
 
 ## AVAILABLE TOOLS
 ${formatToolsForLLM()}
@@ -60,6 +60,18 @@ You must respond with valid JSON only:
   "action": {
     "tool": "tool_name",
     "params": { ... }
+  }
+}
+
+## WHEN TO USE complete()
+Call complete() when you can answer the task. Example:
+{
+  "thinking": "I have gathered enough information about the company from the scraped content. They are a luxury goods company founded in 2001...",
+  "action": {
+    "tool": "complete",
+    "params": {
+      "result": "Aspinal of London is a British luxury leather goods company founded in 2001 by Iain Burton. They specialize in handcrafted leather bags, accessories, and personalized gifts. The company is known for their signature 'A' lock hardware and offers products ranging from handbags to travel accessories. They operate retail stores in London and have an international e-commerce presence."
+    }
   }
 }`;
 }

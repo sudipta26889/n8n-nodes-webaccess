@@ -117,33 +117,68 @@ async function forcedCompletion(
 ): Promise<string> {
 	const prompt = buildForcedCompletionPrompt(task, content);
 	
-	const response = await fetch(`${config.baseUrl}/chat/completions`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			'Authorization': `Bearer ${config.apiKey}`,
-		},
-		body: JSON.stringify({
-			model,
-			messages: [
-				{ role: 'system', content: 'You are a helpful research assistant. Synthesize information and provide comprehensive answers.' },
-				{ role: 'user', content: prompt },
-			],
-			temperature: 0.3,
-			max_tokens: 3000,
-		}),
-		signal: AbortSignal.timeout(60000),
-	});
+	try {
+		const response = await fetch(`${config.baseUrl}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${config.apiKey}`,
+			},
+			body: JSON.stringify({
+				model,
+				messages: [
+					{ role: 'system', content: 'You are a helpful research assistant. Synthesize information and provide comprehensive, detailed answers. Never return empty responses.' },
+					{ role: 'user', content: prompt },
+				],
+				temperature: 0.3,
+				max_tokens: 3000,
+			}),
+			signal: AbortSignal.timeout(60000),
+		});
 
-	if (!response.ok) {
-		throw new Error('Failed to generate final response');
+		if (!response.ok) {
+			// Fallback: Return raw content summary
+			return buildFallbackSummary(task, content);
+		}
+
+		const data = await response.json() as {
+			choices?: { message?: { content?: string } }[];
+		};
+
+		const result = data.choices?.[0]?.message?.content?.trim();
+		
+		// If LLM returned empty, use fallback
+		if (!result) {
+			return buildFallbackSummary(task, content);
+		}
+		
+		return result;
+	} catch {
+		// On any error, return fallback
+		return buildFallbackSummary(task, content);
 	}
+}
 
-	const data = await response.json() as {
-		choices?: { message?: { content?: string } }[];
-	};
-
-	return data.choices?.[0]?.message?.content || 'Unable to generate response';
+/**
+ * Build a fallback summary from raw content when LLM fails.
+ */
+function buildFallbackSummary(task: string, content: Map<string, AcquiredContent>): string {
+	const parts: string[] = [];
+	parts.push(`Task: ${task}\n`);
+	parts.push(`Found information from ${content.size} page(s):\n`);
+	
+	for (const [url, c] of content) {
+		parts.push(`\n--- ${url} ---`);
+		if (c.success && c.text) {
+			// Extract key parts of text
+			const text = c.text.slice(0, 2000);
+			parts.push(text);
+		} else {
+			parts.push(`(Could not load: ${c.error || 'Unknown error'})`);
+		}
+	}
+	
+	return parts.join('\n');
 }
 
 /**
@@ -221,7 +256,24 @@ export async function executeAgent(
 
 			// Check if complete
 			if (parsed.action.tool === 'complete') {
-				const result = parsed.action.params.result as string;
+				const result = (parsed.action.params.result as string) || '';
+				
+				// If result is empty, force a proper synthesis
+				if (!result.trim()) {
+					// Agent called complete without a result - force synthesis
+					llmCalls++;
+					totalCost += estimateCostPerCall(model);
+					const synthesizedResult = await forcedCompletion(task, accumulatedContent, llmConfig, model);
+					return {
+						success: true,
+						text: synthesizedResult,
+						iterations: iteration,
+						llmCalls,
+						sources: Array.from(accumulatedContent.keys()),
+						estimatedCost: formatCost(totalCost),
+					};
+				}
+				
 				return {
 					success: true,
 					text: result,
