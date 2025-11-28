@@ -50,6 +50,7 @@ interface WebAccessOutput {
 			tried: string[];
 			reason: string;
 		};
+		methodsTried?: Array<{ method: string; success: boolean; error?: string }>;
 	};
 	error?: string;
 }
@@ -340,19 +341,20 @@ async function processUrl(
 			flareSolverrUrl,
 		});
 
-		if (!content.success) {
-			return {
-				url,
-				task,
-				success: false,
-				data: { text: '' },
-				meta: {
-					usedLlm: false,
-					scrapeMethod: content.method,
-				},
-				error: content.error || 'Failed to acquire content',
-			};
-		}
+	if (!content.success) {
+		return {
+			url,
+			task,
+			success: false,
+			data: { text: '' },
+			meta: {
+				usedLlm: false,
+				scrapeMethod: content.method,
+				methodsTried: content.methodsTried,
+			},
+			error: content.error || 'Failed to acquire content',
+		};
+	}
 
 		// ========================================
 		// STAGE 2: Non-LLM Extraction

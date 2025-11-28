@@ -30,6 +30,8 @@ export interface AcquiredContent {
 	success: boolean;
 	/** Error message if acquisition failed */
 	error?: string;
+	/** Methods that were tried and their results */
+	methodsTried?: Array<{ method: string; success: boolean; error?: string }>;
 }
 
 /**
@@ -61,6 +63,7 @@ export async function acquireContent(
 	options: AcquireOptions = {},
 ): Promise<AcquiredContent> {
 	const startTime = Date.now();
+	const methodsTried: Array<{ method: string; success: boolean; error?: string }> = [];
 
 	// Validate URL first
 	const urlValidation = validateUrl(url);
@@ -73,6 +76,7 @@ export async function acquireContent(
 			scrapeTime: Date.now() - startTime,
 			success: false,
 			error: urlValidation.error || 'Invalid URL',
+			methodsTried,
 		};
 	}
 
@@ -81,10 +85,12 @@ export async function acquireContent(
 	// If a specific method is preferred, try it first
 	if (preferredMethod) {
 		const result = await tryMethod(url, preferredMethod, flareSolverrUrl);
+		methodsTried.push({ method: preferredMethod, success: result.success, error: result.error });
 		if (result.success) {
 			return {
 				...result,
 				scrapeTime: Date.now() - startTime,
+				methodsTried,
 			};
 		}
 	}
@@ -92,10 +98,12 @@ export async function acquireContent(
 	// Stage 1: Try HTTP fetch (fastest, cheapest)
 	if (preferredMethod !== 'http') {
 		const httpResult = await tryMethod(url, 'http', flareSolverrUrl);
+		methodsTried.push({ method: 'http', success: httpResult.success, error: httpResult.error });
 		if (httpResult.success) {
 			return {
 				...httpResult,
 				scrapeTime: Date.now() - startTime,
+				methodsTried,
 			};
 		}
 
@@ -104,21 +112,27 @@ export async function acquireContent(
 		// FlareSolverr handles Cloudflare, rate limits, and other protections
 		if (!skipFlareSolverr && flareSolverrUrl) {
 			const flareResult = await tryMethod(url, 'flaresolverr', flareSolverrUrl);
+			methodsTried.push({ method: 'flaresolverr', success: flareResult.success, error: flareResult.error });
 			if (flareResult.success) {
 				return {
 					...flareResult,
 					scrapeTime: Date.now() - startTime,
+					methodsTried,
 				};
 			}
+		} else if (!flareSolverrUrl) {
+			methodsTried.push({ method: 'flaresolverr', success: false, error: 'FlareSolverr URL not configured' });
 		}
 	}
 
 	// Stage 3: Try Puppeteer as final fallback
 	if (!skipPuppeteer && preferredMethod !== 'puppeteer') {
 		const puppeteerResult = await tryMethod(url, 'puppeteer', flareSolverrUrl);
+		methodsTried.push({ method: 'puppeteer', success: puppeteerResult.success, error: puppeteerResult.error });
 		return {
 			...puppeteerResult,
 			scrapeTime: Date.now() - startTime,
+			methodsTried,
 		};
 	}
 
@@ -131,6 +145,7 @@ export async function acquireContent(
 		scrapeTime: Date.now() - startTime,
 		success: false,
 		error: 'All acquisition methods failed',
+		methodsTried,
 	};
 }
 
