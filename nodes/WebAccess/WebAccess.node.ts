@@ -42,6 +42,7 @@ import {
 } from './utils/extraction';
 import {
 	inferOperation,
+	getFallbackOperations,
 	inferTaskIntent,
 	generateSubTask,
 	scorePageForIntent,
@@ -1422,15 +1423,18 @@ export class WebAccess implements INodeType {
 				const urls = Array.isArray(urlsParam) ? urlsParam : [urlsParam];
 
 				// Auto-detect operation from task description
-				const operation = inferOperation(task);
+				// Use LLM for smarter detection if available, otherwise keyword matching
+				const operation = await inferOperation(task, openAiConfig, aiModel);
 
 				for (const url of urls) {
 					if (!url || !url.trim()) continue;
 
 					try {
-						const context: ProcessUrlContext = {
+						// Try the detected operation first
+						const detectedOperation = operation;
+						let result = await processUrl({
 							url: url.trim(),
-							operation,
+							operation: detectedOperation,
 							task,
 							useAI,
 							aiProvider,
@@ -1438,9 +1442,44 @@ export class WebAccess implements INodeType {
 							crawl4aiBaseUrl,
 							openAiConfig,
 							flareSolverrUrl,
+						});
+
+						// Add detected operation to meta
+						result.json.meta = {
+							...result.json.meta,
+							detectedOperation,
 						};
 
-						const result = await processUrl(context);
+						// If failed, try fallback operations
+						if (!result.json.success) {
+							const fallbacks = getFallbackOperations(detectedOperation);
+							for (const fallbackOp of fallbacks) {
+								const fallbackResult = await processUrl({
+									url: url.trim(),
+									operation: fallbackOp,
+									task,
+									useAI,
+									aiProvider,
+									aiModel,
+									crawl4aiBaseUrl,
+									openAiConfig,
+									flareSolverrUrl,
+								});
+
+								if (fallbackResult.json.success) {
+									// Fallback succeeded - use this result
+									result = fallbackResult;
+									// Add info about the fallback
+									result.json.meta = {
+										...result.json.meta,
+										detectedOperation,
+										originalOperation: detectedOperation,
+										fallbackOperation: fallbackOp,
+									};
+									break;
+								}
+							}
+						}
 
 						const outputItem: INodeExecutionData = {
 							json: result.json as unknown as IDataObject,

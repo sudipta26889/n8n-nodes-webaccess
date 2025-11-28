@@ -3,22 +3,96 @@
  * Interprets natural-language task descriptions to determine extraction goals
  */
 
-import type { TaskIntent, WebAccessOperation } from './types';
+import type { TaskIntent, WebAccessOperation, OpenAIConfig } from './types';
 
 /**
- * Auto-detect the best operation based on the task description.
+ * Use LLM to intelligently detect the best operation for a task.
  * 
- * Analyzes task keywords to determine if user wants:
- * - screenshot: visual capture
- * - downloadAssets: file downloads (PDF, images, etc.)
- * - runScript: custom JavaScript execution
- * - crawl: multi-page discovery (contacts, products across site)
- * - fetchContent: single-page extraction (default)
+ * This provides much smarter detection than keyword matching because it
+ * understands natural language semantics.
+ * 
+ * @param {string} task - Task description from user
+ * @param {OpenAIConfig} openAiConfig - OpenAI-compatible API configuration
+ * @param {string} model - Model to use for detection
+ * @returns {Promise<WebAccessOperation>} Detected operation type
+ */
+export async function inferOperationWithLLM(
+	task: string,
+	openAiConfig: OpenAIConfig,
+	model: string,
+): Promise<WebAccessOperation> {
+	const systemPrompt = `You are a task classifier for a web access tool. Given a user's task description, classify it into ONE of these operations:
+
+- screenshot: User wants a visual capture/image of the webpage
+- downloadAssets: User wants to download files (PDFs, images, CSVs, documents)
+- runScript: User wants to execute JavaScript, click buttons, fill forms, or interact with page elements
+- crawl: User wants to find information across multiple pages (contact info, product lists, site-wide search)
+- fetchContent: User wants to extract text/data from a single page (articles, specific info, text content)
+
+Respond with ONLY the operation name, nothing else. If unsure, respond with "fetchContent".
+
+Examples:
+- "Take a screenshot" → screenshot
+- "Capture the page visually" → screenshot
+- "Download all PDFs" → downloadAssets
+- "Get the invoice documents" → downloadAssets
+- "Click the submit button" → runScript
+- "Fill in the contact form" → runScript
+- "Find the company email" → crawl
+- "Get all products from this store" → crawl
+- "Extract the article text" → fetchContent
+- "What is on this page?" → fetchContent`;
+
+	try {
+		const response = await fetch(`${openAiConfig.baseUrl}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${openAiConfig.apiKey}`,
+			},
+			body: JSON.stringify({
+				model,
+				messages: [
+					{ role: 'system', content: systemPrompt },
+					{ role: 'user', content: task },
+				],
+				max_tokens: 20,
+				temperature: 0,
+			}),
+		});
+
+		if (!response.ok) {
+			// Fall back to keyword matching
+			return inferOperationKeyword(task);
+		}
+
+		const data = await response.json() as { choices?: { message?: { content?: string } }[] };
+		const result = data.choices?.[0]?.message?.content?.trim().toLowerCase();
+
+		// Validate the response
+		const validOperations: WebAccessOperation[] = ['screenshot', 'downloadAssets', 'runScript', 'crawl', 'fetchContent'];
+		if (validOperations.includes(result as WebAccessOperation)) {
+			return result as WebAccessOperation;
+		}
+
+		// Fall back to keyword matching if LLM response is invalid
+		return inferOperationKeyword(task);
+	} catch {
+		// Fall back to keyword matching on any error
+		return inferOperationKeyword(task);
+	}
+}
+
+/**
+ * Auto-detect the best operation based on task keywords.
+ * 
+ * Uses keyword-based heuristics - fast but less smart than LLM.
+ * Used as fallback when LLM is not available.
  * 
  * @param {string} task - Task description from user
  * @returns {WebAccessOperation} Detected operation type
  */
-export function inferOperation(task: string): WebAccessOperation {
+export function inferOperationKeyword(task: string): WebAccessOperation {
 	const lowerTask = task.toLowerCase().trim();
 
 	// Screenshot detection
@@ -89,6 +163,60 @@ export function inferOperation(task: string): WebAccessOperation {
 
 	// Default to fetchContent for single-page extraction
 	return 'fetchContent';
+}
+
+/**
+ * Infer operation - uses LLM if available, otherwise keyword matching.
+ * 
+ * @param {string} task - Task description from user
+ * @param {OpenAIConfig} [openAiConfig] - Optional OpenAI config for LLM detection
+ * @param {string} [model] - Optional model name
+ * @returns {Promise<WebAccessOperation>} Detected operation type
+ */
+export async function inferOperation(
+	task: string,
+	openAiConfig?: OpenAIConfig,
+	model?: string,
+): Promise<WebAccessOperation> {
+	// If LLM is available, use it for smarter detection
+	if (openAiConfig && model) {
+		return inferOperationWithLLM(task, openAiConfig, model);
+	}
+
+	// Fall back to keyword matching
+	return inferOperationKeyword(task);
+}
+
+/**
+ * Get fallback operations for when the primary operation fails.
+ * 
+ * Returns an ordered list of operations to try after the primary one fails.
+ * Logic:
+ * - crawl fails → try fetchContent (maybe data is on the first page)
+ * - screenshot fails → no fallback (screenshot-specific)
+ * - downloadAssets fails → no fallback (asset-specific)
+ * - runScript fails → no fallback (script-specific)
+ * - fetchContent fails → try crawl (maybe need to look at other pages)
+ * 
+ * @param {WebAccessOperation} failedOperation - The operation that failed
+ * @returns {WebAccessOperation[]} List of fallback operations to try
+ */
+export function getFallbackOperations(failedOperation: WebAccessOperation): WebAccessOperation[] {
+	switch (failedOperation) {
+		case 'crawl':
+			// Crawl failed - try single page extraction
+			return ['fetchContent'];
+		case 'fetchContent':
+			// Single page failed - try crawling for more pages
+			return ['crawl'];
+		case 'screenshot':
+		case 'downloadAssets':
+		case 'runScript':
+			// These are specific operations, no good fallback
+			return [];
+		default:
+			return [];
+	}
 }
 
 /**

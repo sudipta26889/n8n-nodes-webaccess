@@ -57,6 +57,10 @@ export interface WebAccessMeta {
 	llmError?: string;
 	pagesChecked?: number;
 	pagesWithData?: number;
+	// Fallback tracking
+	originalOperation?: WebAccessOperation;
+	fallbackOperation?: WebAccessOperation;
+	detectedOperation?: WebAccessOperation;
 }
 
 // Main output JSON structure
