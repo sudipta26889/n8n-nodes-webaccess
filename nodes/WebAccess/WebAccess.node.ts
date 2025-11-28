@@ -1273,10 +1273,6 @@ export class WebAccess implements INodeType {
 		usableAsTool: true,
 		credentials: [
 			{
-				name: 'webAccessApi',
-				required: false,
-			},
-			{
 				name: 'openAICompatibleApi',
 				required: false,
 				displayOptions: {
@@ -1450,19 +1446,6 @@ export class WebAccess implements INodeType {
 		const useAI = this.getNodeParameter('useAI', 0) as boolean;
 		const aiProvider = useAI ? (this.getNodeParameter('aiProvider', 0) as string) : undefined;
 
-		// Try to get WebAccessApi credentials (optional, may override crawl4aiBaseUrl)
-		try {
-			const webAccessCreds = await this.getCredentials('webAccessApi');
-			if (webAccessCreds) {
-				// Override crawl4aiBaseUrl if provided in credentials
-				const credsUrl = webAccessCreds.crawl4aiUrl as string;
-				if (credsUrl && credsUrl.trim()) {
-					crawl4aiBaseUrl = credsUrl.trim();
-				}
-			}
-		} catch {
-			// WebAccessApi credentials not configured, continue with parameter value
-		}
 
 		// Get AI model - handle both string and resourceLocator formats
 		let aiModel: string | undefined;
