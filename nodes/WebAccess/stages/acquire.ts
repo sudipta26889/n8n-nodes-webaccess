@@ -99,14 +99,10 @@ export async function acquireContent(
 			};
 		}
 
-		// Check if we should try FlareSolverr
-		const isBlocked = httpResult.error?.includes('blocked') ||
-			httpResult.error?.includes('CAPTCHA') ||
-			httpResult.error?.includes('403') ||
-			httpResult.error?.includes('Cloudflare');
-
-		// Stage 2: Try FlareSolverr if configured and HTTP was blocked
-		if (!skipFlareSolverr && flareSolverrUrl && isBlocked) {
+		// Stage 2: Try FlareSolverr if configured
+		// Try FlareSolverr whenever HTTP fails (not just on blocked patterns)
+		// FlareSolverr handles Cloudflare, rate limits, and other protections
+		if (!skipFlareSolverr && flareSolverrUrl) {
 			const flareResult = await tryMethod(url, 'flaresolverr', flareSolverrUrl);
 			if (flareResult.success) {
 				return {
