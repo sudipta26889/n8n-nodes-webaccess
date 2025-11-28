@@ -6,6 +6,92 @@
 import type { TaskIntent, WebAccessOperation } from './types';
 
 /**
+ * Auto-detect the best operation based on the task description.
+ * 
+ * Analyzes task keywords to determine if user wants:
+ * - screenshot: visual capture
+ * - downloadAssets: file downloads (PDF, images, etc.)
+ * - runScript: custom JavaScript execution
+ * - crawl: multi-page discovery (contacts, products across site)
+ * - fetchContent: single-page extraction (default)
+ * 
+ * @param {string} task - Task description from user
+ * @returns {WebAccessOperation} Detected operation type
+ */
+export function inferOperation(task: string): WebAccessOperation {
+	const lowerTask = task.toLowerCase().trim();
+
+	// Screenshot detection
+	if (
+		lowerTask.includes('screenshot') ||
+		lowerTask.includes('screen shot') ||
+		lowerTask.includes('capture') ||
+		lowerTask.includes('visual') ||
+		lowerTask.includes('image of the page') ||
+		lowerTask.includes('picture of')
+	) {
+		return 'screenshot';
+	}
+
+	// Download assets detection
+	if (
+		lowerTask.includes('download') ||
+		lowerTask.includes('get pdf') ||
+		lowerTask.includes('get the pdf') ||
+		lowerTask.includes('fetch pdf') ||
+		lowerTask.includes('save pdf') ||
+		lowerTask.includes('get image') ||
+		lowerTask.includes('get all image') ||
+		lowerTask.includes('download image') ||
+		lowerTask.includes('save image') ||
+		lowerTask.includes('get csv') ||
+		lowerTask.includes('download csv') ||
+		lowerTask.includes('get file') ||
+		lowerTask.includes('download file')
+	) {
+		return 'downloadAssets';
+	}
+
+	// Run script detection
+	if (
+		lowerTask.includes('run script') ||
+		lowerTask.includes('execute script') ||
+		lowerTask.includes('run javascript') ||
+		lowerTask.includes('execute javascript') ||
+		lowerTask.includes('run code') ||
+		lowerTask.includes('click button') ||
+		lowerTask.includes('fill form') ||
+		lowerTask.includes('submit form') ||
+		lowerTask.includes('interact with')
+	) {
+		return 'runScript';
+	}
+
+	// Crawl detection - multi-page scenarios
+	if (
+		lowerTask.includes('crawl') ||
+		lowerTask.includes('spider') ||
+		lowerTask.includes('all pages') ||
+		lowerTask.includes('entire site') ||
+		lowerTask.includes('whole site') ||
+		lowerTask.includes('across the site') ||
+		lowerTask.includes('from the website') ||
+		lowerTask.includes('find contact') ||
+		lowerTask.includes('find email') ||
+		lowerTask.includes('find phone') ||
+		lowerTask.includes('list all products') ||
+		lowerTask.includes('get all products') ||
+		lowerTask.includes('product catalog') ||
+		lowerTask.includes('product list')
+	) {
+		return 'crawl';
+	}
+
+	// Default to fetchContent for single-page extraction
+	return 'fetchContent';
+}
+
+/**
  * Infer what the user wants to extract based on task description and operation.
  * 
  * Uses keyword-based heuristics to determine extraction goals (emails, phones,

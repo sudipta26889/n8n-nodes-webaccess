@@ -21,7 +21,6 @@ import { flareSolverrFetch } from './strategies/flaresolverr';
 
 // Import utilities
 import type {
-	WebAccessOperation,
 	WebAccessResultJson,
 	WebAccessMeta,
 	ProcessUrlContext,
@@ -42,6 +41,7 @@ import {
 	validateUrl,
 } from './utils/extraction';
 import {
+	inferOperation,
 	inferTaskIntent,
 	generateSubTask,
 	scorePageForIntent,
@@ -1268,9 +1268,9 @@ export class WebAccess implements INodeType {
 		name: 'webAccess',
 		icon: { light: 'file:webaccess.svg', dark: 'file:webaccess.dark.svg' },
 		group: ['transform'],
-		version: 3,
-		subtitle: '={{$parameter["operation"]}}',
-		description: 'Access websites to extract data, find contact info, download files, take screenshots, or run scripts. Use "Fetch Content" for single-page extraction, "Crawl" for multi-page discovery (emails, products), "Download Assets" for PDFs/images, "Screenshot" for visual capture, "Run Script" for custom browser automation.',
+		version: 4,
+		subtitle: '={{$parameter["task"]}}',
+		description: 'Smart web access - just describe what you want. Auto-detects whether to fetch content, crawl multiple pages, download files, or take screenshots based on your task.',
 		defaults: {
 			name: 'Web Access',
 		},
@@ -1303,50 +1303,9 @@ export class WebAccess implements INodeType {
 				},
 				default: [],
 				required: true,
-				description: 'Website URL(s) to access. For Crawl operation, this is the starting point. Include https:// protocol.',
+				description: 'Website URL(s) to access',
 			},
-			// Operation selection
-			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				options: [
-					{
-						name: 'Crawl',
-						value: 'crawl',
-						description: 'Discover and extract data from multiple pages. Best for: finding contact emails/phones across a website, listing products from e-commerce sites, exploring site structure. Automatically visits contact, about, and relevant pages.',
-						action: 'Crawl website to find emails phones or products',
-					},
-					{
-						name: 'Download Assets',
-						value: 'downloadAssets',
-						description: 'Download files from a webpage. Best for: getting PDFs, images, CSV files linked on a page. Returns files as binary data (single file or ZIP for multiple).',
-						action: 'Download pd fs images or other files from url',
-					},
-					{
-						name: 'Fetch Content',
-						value: 'fetchContent',
-						description: 'Extract specific data from a single page. Best for: getting text content, extracting specific information, reading article content. Uses intelligent extraction based on your task.',
-						action: 'Extract content or data from a single URL',
-					},
-					{
-						name: 'Run Script',
-						value: 'runScript',
-						description: 'Execute custom JavaScript in the browser. Best for: complex interactions, clicking buttons, filling forms, extracting dynamic content that requires browser execution.',
-						action: 'Run custom java script on a webpage',
-					},
-					{
-						name: 'Screenshot',
-						value: 'screenshot',
-						description: 'Capture a visual screenshot of the page. Best for: documenting page appearance, capturing charts/graphs, visual verification. Returns PNG image.',
-						action: 'Take a screenshot of a webpage',
-					},
-				],
-				default: 'fetchContent',
-				required: true,
-			},
-			// Task parameter
+			// Task parameter - the main input that drives everything
 			{
 				displayName: 'Task',
 				name: 'task',
@@ -1356,7 +1315,8 @@ export class WebAccess implements INodeType {
 				},
 				default: '',
 				required: true,
-				description: 'What to extract or do. Examples: "Find contact email", "Get all product names and prices", "Download PDF files", "Take full page screenshot", "Extract main article text".',
+				 
+				description: 'Describe what you want. The system auto-detects the right approach. Examples: "Find contact email", "Download all PDFs", "Take screenshot", "Get product list", "Extract article text".',
 				placeholder: 'e.g., "Find contact email" or "Download all PDFs"',
 			},
 			// AI Provider selection - also acts as LLM enable/disable
@@ -1457,10 +1417,12 @@ export class WebAccess implements INodeType {
 
 		try {
 			for (let i = 0; i < items.length; i++) {
-				const operation = this.getNodeParameter('operation', i) as WebAccessOperation;
 				const task = this.getNodeParameter('task', i) as string;
 				const urlsParam = this.getNodeParameter('urls', i) as string | string[];
 				const urls = Array.isArray(urlsParam) ? urlsParam : [urlsParam];
+
+				// Auto-detect operation from task description
+				const operation = inferOperation(task);
 
 				for (const url of urls) {
 					if (!url || !url.trim()) continue;
