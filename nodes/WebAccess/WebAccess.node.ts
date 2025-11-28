@@ -1262,7 +1262,7 @@ export class WebAccess implements INodeType {
 		name: 'webAccess',
 		icon: { light: 'file:webaccess.svg', dark: 'file:webaccess.dark.svg' },
 		group: ['transform'],
-		version: 2,
+		version: 3,
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Access websites to extract data, find contact info, download files, take screenshots, or run scripts. Use "Fetch Content" for single-page extraction, "Crawl" for multi-page discovery (emails, products), "Download Assets" for PDFs/images, "Screenshot" for visual capture, "Run Script" for custom browser automation.',
 		defaults: {
@@ -1277,7 +1277,6 @@ export class WebAccess implements INodeType {
 				required: false,
 				displayOptions: {
 					show: {
-						useAI: [true],
 						aiProvider: ['openai-compatible'],
 					},
 				},
@@ -1350,21 +1349,18 @@ export class WebAccess implements INodeType {
 				description: 'What to extract or do. Examples: "Find contact email", "Get all product names and prices", "Download PDF files", "Take full page screenshot", "Extract main article text".',
 				placeholder: 'e.g., "Find contact email" or "Download all PDFs"',
 			},
-			// useAI toggle - Enable LLM-based extraction
+			// AI Provider selection - also acts as LLM enable/disable
 			{
-				displayName: 'Use LLM Extraction',
-				name: 'useAI',
-				type: 'boolean',
-				default: false,
-				noDataExpression: true,
-				description: 'Whether to enable LLM-based extraction when other methods fail',
-			},
-			// AI Provider (shown when useAI is true)
-			{
-				displayName: 'AI Provider',
+				displayName: 'LLM Provider',
 				name: 'aiProvider',
 				type: 'options',
+				noDataExpression: true,
 				options: [
+					{
+						name: 'None (Disable LLM)',
+						value: 'none',
+						description: 'Do not use LLM extraction - rely on pattern matching only',
+					},
 					{
 						name: 'Crawl4AI Internal',
 						value: 'crawl4ai',
@@ -1376,12 +1372,7 @@ export class WebAccess implements INodeType {
 						description: 'Use OpenAI, OpenRouter, Groq, Together AI, or any OpenAI-compatible API',
 					},
 				],
-				default: 'crawl4ai',
-				displayOptions: {
-					show: {
-						useAI: [true],
-					},
-				},
+				default: 'none',
 				description: 'AI provider for LLM extraction',
 			},
 			// AI Model dropdown with dynamic list (shown when openai-compatible is selected)
@@ -1392,7 +1383,6 @@ export class WebAccess implements INodeType {
 				default: { mode: 'id', value: 'gpt-4o-mini' },
 				displayOptions: {
 					show: {
-						useAI: [true],
 						aiProvider: ['openai-compatible'],
 					},
 				},
@@ -1443,20 +1433,19 @@ export class WebAccess implements INodeType {
 		// Read global parameters
 		const crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
 		const flareSolverrUrl = (this.getNodeParameter('flareSolverrUrl', 0) as string) || undefined;
-		const useAI = this.getNodeParameter('useAI', 0) as boolean;
-		const aiProvider = useAI ? (this.getNodeParameter('aiProvider', 0) as string) : undefined;
-
+		const aiProvider = this.getNodeParameter('aiProvider', 0) as string;
+		const useAI = aiProvider !== 'none';
 
 		// Get AI model - handle both string and resourceLocator formats
 		let aiModel: string | undefined;
-		if (useAI && aiProvider === 'openai-compatible') {
+		if (aiProvider === 'openai-compatible') {
 			const aiModelParam = this.getNodeParameter('aiModel', 0) as string | { value: string };
 			aiModel = typeof aiModelParam === 'string' ? aiModelParam : aiModelParam?.value;
 		}
 
 		// Get OpenAI credentials if using openai-compatible provider
 		let openAiConfig: { apiKey: string; baseUrl: string } | undefined;
-		if (useAI && aiProvider === 'openai-compatible') {
+		if (aiProvider === 'openai-compatible') {
 			try {
 				const credentials = await this.getCredentials('openAICompatibleApi');
 				openAiConfig = {
