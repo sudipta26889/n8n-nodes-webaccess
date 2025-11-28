@@ -189,6 +189,9 @@ function formatIntent(intent: ExtractionAttempt['detectedIntent']): string {
 	if (intent.wantsScreenshot) flags.push('screenshot');
 	if (intent.wantsDownload) flags.push('download');
 	if (intent.isResearch) flags.push('research');
+	if (intent.isComplexTask) flags.push('complex-multi-step');
+	if (intent.requiresNavigation) flags.push('requires-navigation');
+	if (intent.wantsStructuredData) flags.push('structured-data');
 	if (intent.isGeneral) flags.push('general');
 	return flags.join(', ') || 'none detected';
 }

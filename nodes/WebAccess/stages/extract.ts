@@ -60,6 +60,12 @@ export interface DetectedIntent {
 	wantsDownload: boolean;
 	isResearch: boolean;
 	isGeneral: boolean;
+	/** Complex multi-step task that requires LLM */
+	isComplexTask: boolean;
+	/** Task requires navigation/pagination */
+	requiresNavigation: boolean;
+	/** Task asks for structured data extraction */
+	wantsStructuredData: boolean;
 }
 
 /**
@@ -123,9 +129,40 @@ export function detectIntent(task: string): DetectedIntent {
 		lowerTask.includes('overview') ||
 		lowerTask.includes('summary');
 
+	// Detect complex multi-step tasks
+	const isComplexTask = 
+		/\bthen\b/.test(lowerTask) ||                    // "first X, then Y"
+		/\band\s+then\b/.test(lowerTask) ||              // "do X and then Y"
+		/\bfirst\b.*\bthen\b/.test(lowerTask) ||         // "first do X, then Y"
+		/\bafter\b.*\b(do|get|extract)\b/.test(lowerTask) || // "after X, do Y"
+		(lowerTask.match(/,/g) || []).length >= 2 ||     // Multiple comma-separated steps
+		/\b(step|steps)\s*\d/i.test(lowerTask) ||        // "step 1, step 2"
+		/\ball\b.*\bfrom\b.*\bpage\b/i.test(lowerTask);  // "all X from page"
+
+	// Detect navigation/pagination requirements
+	const requiresNavigation = 
+		lowerTask.includes('pagination') ||
+		lowerTask.includes('next page') ||
+		lowerTask.includes('next button') ||
+		lowerTask.includes('follow') ||
+		lowerTask.includes('navigate') ||
+		lowerTask.includes('click') ||
+		lowerTask.includes('page 2') ||
+		lowerTask.includes('page 3') ||
+		/\bpage\s+\d+\b/.test(lowerTask) ||              // "page N"
+		/\bpages?\s+\d+\s*(to|-)\s*\d+\b/.test(lowerTask); // "pages 1-5"
+
+	// Detect structured data with relationships
+	const wantsStructuredData = 
+		/\bwith\s+(their|the|its)\b/.test(lowerTask) ||  // "quotes with their authors"
+		/\b(and|with)\s+(author|tag|price|name|date|title)s?\b/.test(lowerTask) || // "X with authors/tags"
+		/\b\d+\s+(quote|item|product|record|result)s?\b/.test(lowerTask) || // "10 quotes"
+		/\ball\s+(quote|item|product|record|result|link)s?\b/.test(lowerTask); // "all quotes"
+
 	// General if no specific intent detected
 	const isGeneral = !wantsEmail && !wantsPhone && !wantsProducts && 
-		!wantsText && !wantsScreenshot && !wantsDownload && !isResearch;
+		!wantsText && !wantsScreenshot && !wantsDownload && !isResearch &&
+		!isComplexTask && !requiresNavigation && !wantsStructuredData;
 
 	return {
 		wantsEmail,
@@ -136,6 +173,9 @@ export function detectIntent(task: string): DetectedIntent {
 		wantsDownload,
 		isResearch,
 		isGeneral,
+		isComplexTask,
+		requiresNavigation,
+		wantsStructuredData,
 	};
 }
 
@@ -232,6 +272,39 @@ export function tryNonLlmExtraction(
 			data: foundData ? data : null,
 			whatWasTried,
 			reason: 'No products found in content',
+			detectedIntent: intent,
+		};
+	}
+
+	// Complex multi-step tasks require LLM
+	if (intent.isComplexTask) {
+		return {
+			success: false,
+			data,
+			whatWasTried,
+			reason: 'Complex multi-step task requires LLM orchestration',
+			detectedIntent: intent,
+		};
+	}
+
+	// Navigation/pagination tasks require LLM agent
+	if (intent.requiresNavigation) {
+		return {
+			success: false,
+			data,
+			whatWasTried,
+			reason: 'Task requires navigation/pagination which needs LLM agent',
+			detectedIntent: intent,
+		};
+	}
+
+	// Structured data extraction needs LLM understanding
+	if (intent.wantsStructuredData) {
+		return {
+			success: false,
+			data,
+			whatWasTried,
+			reason: 'Structured data extraction with relationships requires LLM',
 			detectedIntent: intent,
 		};
 	}
