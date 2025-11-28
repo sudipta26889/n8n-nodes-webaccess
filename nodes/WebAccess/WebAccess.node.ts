@@ -1393,7 +1393,7 @@ export class WebAccess implements INodeType {
 				name: 'aiModel',
 				type: 'resourceLocator',
 				default: { mode: 'id', value: 'gpt-4o-mini' },
-				required: true,
+				required: false,
 				displayOptions: {
 					show: {
 						useAI: [true],
