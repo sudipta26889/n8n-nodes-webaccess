@@ -1262,7 +1262,7 @@ export class WebAccess implements INodeType {
 		name: 'webAccess',
 		icon: { light: 'file:webaccess.svg', dark: 'file:webaccess.dark.svg' },
 		group: ['transform'],
-		version: 1,
+		version: 2,
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Access websites to extract data, find contact info, download files, take screenshots, or run scripts. Use "Fetch Content" for single-page extraction, "Crawl" for multi-page discovery (emails, products), "Download Assets" for PDFs/images, "Screenshot" for visual capture, "Run Script" for custom browser automation.',
 		defaults: {
