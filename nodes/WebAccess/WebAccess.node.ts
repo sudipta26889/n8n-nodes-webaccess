@@ -1143,7 +1143,7 @@ export class WebAccess implements INodeType {
 				displayName: 'Model',
 				name: 'aiModel',
 				type: 'resourceLocator',
-				default: { mode: 'list', value: '' },
+				default: { mode: 'id', value: 'gpt-4o-mini' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -1196,10 +1196,24 @@ export class WebAccess implements INodeType {
 		const returnItems: INodeExecutionData[] = [];
 
 		// Read global parameters
-		const crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
+		let crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
 		const flareSolverrUrl = (this.getNodeParameter('flareSolverrUrl', 0) as string) || undefined;
 		const useAI = this.getNodeParameter('useAI', 0) as boolean;
 		const aiProvider = useAI ? (this.getNodeParameter('aiProvider', 0) as string) : undefined;
+
+		// Try to get WebAccessApi credentials (optional, may override crawl4aiBaseUrl)
+		try {
+			const webAccessCreds = await this.getCredentials('webAccessApi');
+			if (webAccessCreds) {
+				// Override crawl4aiBaseUrl if provided in credentials
+				const credsUrl = webAccessCreds.crawl4aiUrl as string;
+				if (credsUrl && credsUrl.trim()) {
+					crawl4aiBaseUrl = credsUrl.trim();
+				}
+			}
+		} catch {
+			// WebAccessApi credentials not configured, continue with parameter value
+		}
 
 		// Get AI model - handle both string and resourceLocator formats
 		let aiModel: string | undefined;
@@ -1217,8 +1231,11 @@ export class WebAccess implements INodeType {
 					apiKey: credentials.apiKey as string,
 					baseUrl: (credentials.baseUrl as string) || 'https://api.openai.com/v1',
 				};
-			} catch {
-				// Credentials not available
+			} catch (error) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`Failed to load OpenAI-Compatible API credentials. Please configure the credential in the node settings. Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				);
 			}
 		}
 

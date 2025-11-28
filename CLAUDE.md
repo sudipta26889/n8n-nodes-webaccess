@@ -4,12 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an n8n community node package built using the n8n-nodes-starter template. It provides custom nodes for n8n workflow automation. The package uses `@n8n/node-cli` for development tooling.
+This is an n8n community node that provides cost-aware universal web access capabilities. The node implements a progressive pipeline strategy: HTTP → Puppeteer → Crawl4AI BM25 → LLM (Crawl4AI or OpenAI-compatible APIs). Each stage in the pipeline is used only if earlier, cheaper stages fail to extract the required data.
+
+The package uses `@n8n/node-cli` for development tooling.
 
 ## Common Commands
 
 ```bash
-npm run dev          # Start n8n with nodes loaded + hot reload (http://localhost:5678)
+npm run dev          # Start n8n with node loaded + hot reload (http://localhost:5678)
 npm run build        # Compile TypeScript for production
 npm run lint         # Check for errors (uses n8n-node lint)
 npm run lint:fix     # Auto-fix linting issues
@@ -17,46 +19,60 @@ npm run lint:fix     # Auto-fix linting issues
 
 ## Architecture
 
-### Node Types
+### Web Access Node Operations
 
-**Programmatic Style** (`nodes/Example/`):
-- Implements `INodeType` interface with custom `execute()` method
-- Full control over execution logic
-- Use when you need complex processing beyond HTTP requests
+The node supports five operations:
+- **fetchContent**: Extract data from a single page using the progressive pipeline
+- **crawl**: Multi-page discovery for emails, phones, products across a website
+- **screenshot**: Capture visual screenshots using Puppeteer
+- **downloadAssets**: Download PDFs, images, CSVs from pages
+- **runScript**: Execute custom JavaScript in browser context
 
-**Declarative Style** (`nodes/GithubIssues/`):
-- Define operations declaratively with `routing` objects in property definitions
-- No custom execute method needed - n8n handles HTTP requests automatically
-- Preferred for REST API integrations
+### Cost-Aware Pipeline Strategy
+
+Each operation follows a progressive pipeline that attempts cheaper methods first:
+
+1. **HTTP Stage** (`strategies/http.ts`): Simple HTTP fetch with fetch API
+2. **Puppeteer Stage** (`strategies/puppeteer.ts`): Browser automation for JS-heavy pages
+3. **Crawl4AI BM25** (`strategies/crawl4ai.ts`): Semantic search without LLM
+4. **LLM Stage** (`strategies/openai.ts` or Crawl4AI internal): AI-powered extraction as last resort
+
+The pipeline exits early when data is successfully extracted, minimizing cost and latency.
 
 ### Project Structure
 
 ```
-nodes/
-  NodeName/
-    NodeName.node.ts    # Main node class with INodeTypeDescription
-    resources/          # Resource-specific operations (declarative style)
-      resourceName/
-        index.ts        # Exports operation descriptions array
-        get.ts, create.ts, etc.  # Individual operation definitions
-    shared/             # Shared utilities (descriptions, transport, utils)
-    listSearch/         # Dynamic dropdown search methods
+nodes/WebAccess/
+  WebAccess.node.ts           # Main node class with INodeType interface
+  strategies/
+    http.ts                    # HTTP fetch strategy
+    puppeteer.ts              # Browser automation with Puppeteer
+    crawl4ai.ts               # Crawl4AI integration
+    openai.ts                 # OpenAI-compatible API integration
+  utils/
+    types.ts                  # Shared TypeScript type definitions
+    extraction.ts             # Data extraction utilities (emails, phones, products)
+    taskIntent.ts             # Task intent inference for smart routing
 
 credentials/
-  ServiceApi.credentials.ts  # Credential definitions implementing ICredentialType
+  WebAccessApi.credentials.ts        # Crawl4AI service credentials
+  OpenAICompatibleApi.credentials.ts # OpenAI-compatible API credentials
 ```
 
-### Key Patterns
+### Key Implementation Patterns
 
-**Registering nodes**: Add to `n8n.nodes` and `n8n.credentials` arrays in `package.json`
+**Task Intent Inference**: The node analyzes user tasks to determine what data to extract (emails, phones, products, etc.) and routes through appropriate strategies.
 
-**Declarative routing**: Operations define `routing.request` with method, url, and parameters using expressions like `={{$parameter.fieldName}}`
+**Singleton Browser**: Puppeteer browser instance is reused across operations via `getBrowser()` and cleaned up with `closeBrowser()` in execute's finally block.
 
-**List search methods**: Define in node's `methods.listSearch` object for dynamic dropdowns
+**List Search Methods**: Dynamic model dropdown for OpenAI-compatible providers via `methods.listSearch.listModels()`.
 
-**Credential authentication**: Use `authenticate` property with `IAuthenticateGeneric` for header/query auth injection
+**Binary Data Handling**: Screenshots and assets return binary data via `IBinaryData` format. Multiple assets are automatically zipped using JSZip.
+
+**Error Handling**: Each strategy returns `StrategyResult` with success flag. Pipeline continues to next stage on failure.
 
 ## Requirements
 
 - Node.js v22 or higher
 - TypeScript strict mode enabled
+- External services: Crawl4AI HTTP API (default: http://157.173.126.92:11235)
