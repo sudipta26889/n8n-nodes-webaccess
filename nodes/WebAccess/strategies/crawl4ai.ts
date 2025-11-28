@@ -7,9 +7,10 @@
 /* eslint-disable @n8n/community-nodes/no-restricted-globals -- setTimeout/clearTimeout needed for request timeouts */
 
 import type { StrategyResult, CrawledPage, Crawl4AICrawlConfig } from '../utils/types';
+import { DEFAULT_CRAWL4AI_TIMEOUT, MAX_CRAWL_PAGES } from '../utils/config';
 
 // Default timeout for Crawl4AI requests
-const DEFAULT_TIMEOUT = 60000;
+const DEFAULT_TIMEOUT = DEFAULT_CRAWL4AI_TIMEOUT;
 
 // Social media domains to exclude from crawling
 const SOCIAL_MEDIA_DOMAINS = [
@@ -26,7 +27,15 @@ const SOCIAL_MEDIA_DOMAINS = [
 ];
 
 /**
- * Query Crawl4AI /md endpoint for semantic search or LLM extraction
+ * Query Crawl4AI /md endpoint for semantic search or LLM extraction.
+ * 
+ * Uses either BM25 (semantic search) or LLM-based extraction depending on useLlm flag.
+ * 
+ * @param {string} baseUrl - Crawl4AI service base URL
+ * @param {string} targetUrl - URL to query
+ * @param {string} query - Query string for extraction
+ * @param {boolean} useLlm - Whether to use LLM extraction (true) or BM25 (false)
+ * @returns {Promise<StrategyResult>} Result containing extracted content
  */
 export async function crawl4aiQuery(
 	baseUrl: string,
@@ -144,13 +153,19 @@ function isSameDomain(url: string, seedHostname: string): boolean {
 }
 
 /**
- * Crawl a website using Crawl4AI /crawl endpoint
- * Returns a list of discovered pages (filtered to same domain as seed URL)
+ * Crawl a website using Crawl4AI /crawl endpoint.
+ * 
+ * Returns a list of discovered pages (filtered to same domain as seed URL).
+ * 
+ * @param {string} baseUrl - Crawl4AI service base URL
+ * @param {string} targetUrl - Starting URL for crawling
+ * @param {number} maxPages - Maximum number of pages to return (default: MAX_CRAWL_PAGES)
+ * @returns {Promise<CrawledPage[]>} Array of discovered pages
  */
 export async function crawl4aiCrawl(
 	baseUrl: string,
 	targetUrl: string,
-	maxPages: number = 100,
+	maxPages: number = MAX_CRAWL_PAGES,
 ): Promise<CrawledPage[]> {
 	const endpoint = `${baseUrl.replace(/\/$/, '')}/crawl`;
 
@@ -311,7 +326,12 @@ export async function crawl4aiCrawl(
 }
 
 /**
- * Check if Crawl4AI service is available
+ * Check if Crawl4AI service is available.
+ * 
+ * Performs a health check on the Crawl4AI service.
+ * 
+ * @param {string} baseUrl - Crawl4AI service base URL
+ * @returns {Promise<boolean>} True if service is available, false otherwise
  */
 export async function isCrawl4AIAvailable(baseUrl: string): Promise<boolean> {
 	try {

@@ -6,21 +6,38 @@
 /* eslint-disable @n8n/community-nodes/no-restricted-globals -- setTimeout/clearTimeout needed for request timeouts */
 
 import type { StrategyResult, HttpFetchOptions } from '../utils/types';
-import { extractTextContent, isBlockedContent } from '../utils/extraction';
+import { extractTextContent, isBlockedContent, validateUrl } from '../utils/extraction';
+import { DEFAULT_HTTP_TIMEOUT } from '../utils/config';
 
 // Default timeout in milliseconds
-const DEFAULT_TIMEOUT = 30000;
+const DEFAULT_TIMEOUT = DEFAULT_HTTP_TIMEOUT;
 
 // Default user agent
 const DEFAULT_USER_AGENT =
 	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 /**
- * Fetch a URL using HTTP and return the HTML content
- * Handles redirects, timeouts, and common error codes
+ * Fetch a URL using HTTP and return the HTML content.
+ * 
+ * Handles redirects, timeouts, and common error codes.
+ * Validates URL for security before fetching.
+ * 
+ * @param {string} url - The URL to fetch
+ * @param {HttpFetchOptions} options - Optional configuration (timeout, userAgent)
+ * @returns {Promise<StrategyResult>} Result containing HTML and text content
  */
 export async function httpFetch(url: string, options: HttpFetchOptions = {}): Promise<StrategyResult> {
 	const { timeout = DEFAULT_TIMEOUT, userAgent = DEFAULT_USER_AGENT } = options;
+
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			success: false,
+			data: null,
+			error: urlValidation.error || 'Invalid URL',
+		};
+	}
 
 	try {
 		// Create abort controller for timeout
@@ -162,14 +179,26 @@ export async function httpFetch(url: string, options: HttpFetchOptions = {}): Pr
 }
 
 /**
- * Download a binary asset via HTTP
- * Returns the buffer and mime type
+ * Download a binary asset via HTTP.
+ * 
+ * Downloads a file from the given URL and returns its buffer and MIME type.
+ * Validates URL for security before downloading.
+ * 
+ * @param {string} url - The URL of the asset to download
+ * @param {HttpFetchOptions} options - Optional configuration (timeout, userAgent)
+ * @returns {Promise<{ buffer: Buffer; mimeType: string } | null>} Asset data or null if download fails
  */
 export async function downloadAsset(
 	url: string,
 	options: HttpFetchOptions = {},
 ): Promise<{ buffer: Buffer; mimeType: string } | null> {
 	const { timeout = DEFAULT_TIMEOUT, userAgent = DEFAULT_USER_AGENT } = options;
+
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return null;
+	}
 
 	try {
 		const controller = new AbortController();

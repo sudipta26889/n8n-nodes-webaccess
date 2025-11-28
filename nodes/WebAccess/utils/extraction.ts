@@ -6,6 +6,7 @@
 // eslint-disable-next-line @n8n/community-nodes/no-restricted-imports -- Required for HTML parsing in self-hosted deployments
 import * as cheerio from 'cheerio';
 import type { ProductSummary, AssetType } from './types';
+import { ALLOWED_PROTOCOLS, BLOCKED_URL_PATTERNS } from './config';
 
 // Email regex - comprehensive pattern for common email formats
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -36,7 +37,48 @@ const ASSET_EXTENSIONS: Record<AssetType, string[]> = {
 };
 
 /**
- * Check if an email matches junk patterns
+ * Validate URL for security (SSRF prevention).
+ * 
+ * Checks that the URL uses allowed protocols and doesn't match
+ * blocked patterns (localhost, private IPs, etc.).
+ * 
+ * @param {string} url - The URL to validate
+ * @returns {{ valid: boolean; error?: string }} Validation result
+ */
+export function validateUrl(url: string): { valid: boolean; error?: string } {
+	if (!url || typeof url !== 'string') {
+		return { valid: false, error: 'URL must be a non-empty string' };
+	}
+
+	try {
+		const urlObj = new URL(url);
+
+		// Check protocol
+		if (!ALLOWED_PROTOCOLS.includes(urlObj.protocol)) {
+			return { valid: false, error: `Protocol ${urlObj.protocol} is not allowed. Only http: and https: are permitted.` };
+		}
+
+		// Check for blocked patterns
+		const hostname = urlObj.hostname.toLowerCase();
+		for (const pattern of BLOCKED_URL_PATTERNS) {
+			if (pattern.test(hostname)) {
+				return { valid: false, error: 'URL matches blocked pattern (localhost or private IP)' };
+			}
+		}
+
+		return { valid: true };
+	} catch (error) {
+		return { valid: false, error: `Invalid URL format: ${error instanceof Error ? error.message : 'Unknown error'}` };
+	}
+}
+
+/**
+ * Check if an email matches junk patterns.
+ * 
+ * Filters out common junk email patterns like test emails, noreply addresses, etc.
+ * 
+ * @param {string} email - Email address to check
+ * @returns {boolean} True if email matches junk patterns
  */
 function isJunkEmail(email: string): boolean {
 	for (const pattern of JUNK_EMAIL_PATTERNS) {
@@ -46,8 +88,13 @@ function isJunkEmail(email: string): boolean {
 }
 
 /**
- * Extract email addresses from text or HTML content
- * Handles obfuscated emails and deduplicates
+ * Extract email addresses from text or HTML content.
+ * 
+ * Handles obfuscated emails (e.g., "user [at] domain [dot] com") and deduplicates results.
+ * Filters out junk emails and validates format.
+ * 
+ * @param {string} textOrHtml - Text or HTML content to extract emails from
+ * @returns {string[]} Array of unique email addresses
  */
 export function extractEmails(textOrHtml: string): string[] {
 	if (!textOrHtml) return [];
@@ -126,7 +173,13 @@ export function extractEmails(textOrHtml: string): string[] {
 }
 
 /**
- * Generate common contact page URLs for a website
+ * Generate common contact page URLs for a website.
+ * 
+ * Creates a list of common contact page URL patterns based on the base URL.
+ * Used for faster contact information discovery without full crawling.
+ * 
+ * @param {string} baseUrl - Base URL of the website
+ * @returns {string[]} Array of potential contact page URLs
  */
 export function getContactPageUrls(baseUrl: string): string[] {
 	try {
@@ -159,8 +212,13 @@ export function getContactPageUrls(baseUrl: string): string[] {
 }
 
 /**
- * Extract phone numbers from text content
- * Filters by reasonable length and deduplicates
+ * Extract phone numbers from text content.
+ * 
+ * Filters by reasonable length (7-15 digits) and deduplicates results.
+ * Removes formatting characters for consistency.
+ * 
+ * @param {string} text - Text content to extract phones from
+ * @returns {string[]} Array of unique phone numbers
  */
 export function extractPhones(text: string): string[] {
 	if (!text) return [];
@@ -180,8 +238,13 @@ export function extractPhones(text: string): string[] {
 }
 
 /**
- * Extract visible text content from HTML
- * Strips tags, scripts, styles, and normalizes whitespace
+ * Extract visible text content from HTML.
+ * 
+ * Strips tags, scripts, styles, and normalizes whitespace.
+ * Removes hidden elements and returns clean text content.
+ * 
+ * @param {string} html - HTML content to extract text from
+ * @returns {string} Extracted and normalized text content
  */
 export function extractTextContent(html: string): string {
 	if (!html) return '';
@@ -199,7 +262,12 @@ export function extractTextContent(html: string): string {
 }
 
 /**
- * Extract page title from HTML
+ * Extract page title from HTML.
+ * 
+ * Extracts the page title from <title> tag or falls back to first <h1>.
+ * 
+ * @param {string} html - HTML content to extract title from
+ * @returns {string} Page title or empty string if not found
  */
 export function extractPageTitle(html: string): string {
 	if (!html) return '';
@@ -209,8 +277,14 @@ export function extractPageTitle(html: string): string {
 }
 
 /**
- * Extract products from HTML using common e-commerce patterns
- * Best-effort extraction based on DOM heuristics
+ * Extract products from HTML using common e-commerce patterns.
+ * 
+ * Best-effort extraction based on DOM heuristics. Looks for product cards,
+ * product links, names, and prices using common CSS selectors.
+ * 
+ * @param {string} html - HTML content to extract products from
+ * @param {string} [baseUrl] - Base URL for resolving relative product URLs
+ * @returns {ProductSummary[]} Array of extracted products
  */
 export function extractProductsFromHtml(html: string, baseUrl?: string): ProductSummary[] {
 	if (!html) return [];
@@ -306,7 +380,15 @@ export function extractProductsFromHtml(html: string, baseUrl?: string): Product
 }
 
 /**
- * Extract asset URLs from HTML based on asset type
+ * Extract asset URLs from HTML based on asset type.
+ * 
+ * Finds links and images matching the specified asset type (PDF, image, CSV).
+ * Resolves relative URLs to absolute URLs.
+ * 
+ * @param {string} html - HTML content to extract asset URLs from
+ * @param {string} baseUrl - Base URL for resolving relative URLs
+ * @param {AssetType} assetType - Type of assets to extract ('pdf', 'image', 'csv')
+ * @returns {string[]} Array of absolute asset URLs
  */
 export function extractAssetUrls(html: string, baseUrl: string, assetType: AssetType): string[] {
 	if (!html) return [];
@@ -359,7 +441,14 @@ export function extractAssetUrls(html: string, baseUrl: string, assetType: Asset
 }
 
 /**
- * Extract all internal links from HTML (same domain)
+ * Extract all internal links from HTML (same domain).
+ * 
+ * Finds all links that belong to the same domain as the base URL.
+ * Filters out anchors, javascript: links, and mailto: links.
+ * 
+ * @param {string} html - HTML content to extract links from
+ * @param {string} baseUrl - Base URL for domain comparison
+ * @returns {string[]} Array of internal link URLs
  */
 export function extractInternalLinks(html: string, baseUrl: string): string[] {
 	if (!html) return [];
@@ -402,7 +491,13 @@ export function extractInternalLinks(html: string, baseUrl: string): string[] {
 }
 
 /**
- * Check if HTML content appears to be blocked (CAPTCHA, 403, etc.)
+ * Check if HTML content appears to be blocked (CAPTCHA, 403, etc.).
+ * 
+ * Detects common blocking patterns like CAPTCHA pages, Cloudflare challenges,
+ * access denied pages, and suspiciously short content.
+ * 
+ * @param {string} html - HTML content to check
+ * @returns {boolean} True if content appears to be blocked
  */
 export function isBlockedContent(html: string): boolean {
 	if (!html) return true;

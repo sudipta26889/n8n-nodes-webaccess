@@ -1,8 +1,13 @@
 import type { ICredentialType, INodeProperties, Icon, ICredentialTestRequest } from 'n8n-workflow';
 
 /**
- * Optional credential type for Web Access node
+ * Optional credential type for Web Access node.
+ * 
  * Provides API key storage for future external service integrations
+ * and allows overriding the default Crawl4AI URL.
+ * 
+ * @class WebAccessApi
+ * @implements {ICredentialType}
  */
 export class WebAccessApi implements ICredentialType {
 	name = 'webAccessApi';
@@ -35,7 +40,7 @@ export class WebAccessApi implements ICredentialType {
 	// Test the credential by checking the Crawl4AI health endpoint
 	test: ICredentialTestRequest = {
 		request: {
-			baseURL: '={{ $credentials.crawl4aiUrl || "http://157.173.126.92:11235" }}',
+			baseURL: '={{ $credentials.crawl4aiUrl || "http://127.0.0.1:11235" }}',
 			url: '/health',
 			method: 'GET',
 		},

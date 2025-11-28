@@ -82,4 +82,4 @@ credentials/
 
 - Node.js v22 or higher
 - TypeScript strict mode enabled
-- External services: Crawl4AI HTTP API (default: http://157.173.126.92:11235)
+- External services: Crawl4AI HTTP API (default: http://127.0.0.1:11235)

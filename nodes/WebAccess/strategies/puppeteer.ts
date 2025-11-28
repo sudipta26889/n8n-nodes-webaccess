@@ -7,6 +7,7 @@
 // eslint-disable-next-line @n8n/community-nodes/no-restricted-imports -- Required for browser automation in self-hosted deployments
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import type { PuppeteerPageContent, PuppeteerOptions } from '../utils/types';
+import { DEFAULT_PUPPETEER_TIMEOUT } from '../utils/config';
 
 // Declare browser globals for page.evaluate() contexts
 // These don't exist in Node.js but are available when code runs in browser
@@ -16,13 +17,23 @@ declare const window: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Default timeout in milliseconds
-const DEFAULT_TIMEOUT = 45000;
+const DEFAULT_TIMEOUT = DEFAULT_PUPPETEER_TIMEOUT;
+
+// Default headless mode - run headless unless explicitly disabled via env
+const DEFAULT_HEADLESS = process.env.PUPPETEER_HEADLESS
+	? process.env.PUPPETEER_HEADLESS === 'true'
+	: true;
 
 // Singleton browser instance for reuse
 let browserInstance: Browser | null = null;
 
 /**
- * Get or create a browser instance
+ * Get or create a browser instance.
+ * 
+ * Creates a Puppeteer browser instance with appropriate configuration.
+ * Browser is reused across requests for better performance.
+ * 
+ * @returns {Promise<Browser>} A Puppeteer browser instance
  */
 async function getBrowser(): Promise<Browser> {
 	if (browserInstance && browserInstance.connected) {
@@ -30,7 +41,7 @@ async function getBrowser(): Promise<Browser> {
 	}
 
 	browserInstance = await puppeteer.launch({
-		headless: true,
+		headless: DEFAULT_HEADLESS,
 		args: [
 			'--no-sandbox',
 			'--disable-setuid-sandbox',
@@ -45,17 +56,35 @@ async function getBrowser(): Promise<Browser> {
 }
 
 /**
- * Close the browser instance
+ * Close the browser instance.
+ * 
+ * Properly closes the browser and cleans up resources.
+ * Should be called when done with browser operations.
+ * 
+ * @returns {Promise<void>} Promise that resolves when browser is closed
  */
 export async function closeBrowser(): Promise<void> {
 	if (browserInstance) {
-		await browserInstance.close();
-		browserInstance = null;
+		try {
+			await browserInstance.close();
+		} catch (error) {
+			// Ignore errors during cleanup
+			console.error('Error closing browser:', error);
+		} finally {
+			browserInstance = null;
+		}
 	}
 }
 
 /**
- * Create a new page with standard configuration
+ * Create a new page with standard configuration.
+ * 
+ * Sets up viewport, user agent, timeouts, and request interception
+ * for optimal page loading and resource management.
+ * 
+ * @param {Browser} browser - The Puppeteer browser instance
+ * @param {number} timeout - Timeout in milliseconds for page operations
+ * @returns {Promise<Page>} A configured Puppeteer page instance
  */
 async function createPage(browser: Browser, timeout: number): Promise<Page> {
 	const page = await browser.newPage();
@@ -76,19 +105,25 @@ async function createPage(browser: Browser, timeout: number): Promise<Page> {
 	await page.setRequestInterception(true);
 	page.on('request', (request) => {
 		const resourceType = request.resourceType();
-		// Block fonts and some media to speed up
-		if (['font'].includes(resourceType)) {
-			request.abort();
-		} else {
-			request.continue();
-		}
+		const action =
+			['font'].includes(resourceType) ? request.abort() : request.continue();
+		// Ignore failures that occur when the page is already closed
+		void action.catch(() => {});
 	});
 
 	return page;
 }
 
 /**
- * Get page content (HTML and visible text) using Puppeteer
+ * Get page content (HTML and visible text) using Puppeteer.
+ * 
+ * Navigates to the URL, waits for page to load, and extracts
+ * both HTML and visible text content.
+ * 
+ * @param {string} url - The URL to fetch content from
+ * @param {PuppeteerOptions} options - Optional configuration (timeout, waitUntil)
+ * @returns {Promise<PuppeteerPageContent>} Object containing html and text content
+ * @throws {Error} If navigation fails or timeout is exceeded
  */
 export async function getPageContent(
 	url: string,
@@ -121,7 +156,16 @@ export async function getPageContent(
 }
 
 /**
- * Capture a screenshot of the page
+ * Capture a screenshot of the page.
+ * 
+ * Navigates to the URL and captures a screenshot, optionally
+ * including the full scrollable page.
+ * 
+ * @param {string} url - The URL to screenshot
+ * @param {boolean} fullPage - Whether to capture full scrollable page
+ * @param {PuppeteerOptions} options - Optional configuration (timeout, waitUntil)
+ * @returns {Promise<Buffer>} PNG image buffer
+ * @throws {Error} If navigation fails or screenshot capture fails
  */
 export async function captureScreenshot(
 	url: string,
@@ -157,7 +201,17 @@ export async function captureScreenshot(
 }
 
 /**
- * Run a custom script in the page context
+ * Run a custom script in the page context.
+ * 
+ * Navigates to the URL and executes a user-provided JavaScript script
+ * in the browser context. The script receives a pageContext object
+ * with location, html, and text properties.
+ * 
+ * @param {string} url - The URL to navigate to
+ * @param {string} scriptBody - JavaScript code to execute
+ * @param {PuppeteerOptions} options - Optional configuration (timeout, waitUntil)
+ * @returns {Promise<T>} The result of script execution
+ * @throws {Error} If navigation fails, script execution fails, or script is invalid
  */
 export async function runPageScript<T = unknown>(
 	url: string,
@@ -165,6 +219,11 @@ export async function runPageScript<T = unknown>(
 	options: PuppeteerOptions = {},
 ): Promise<T> {
 	const { timeout = DEFAULT_TIMEOUT, waitUntil = 'networkidle2' } = options;
+
+	// Validate script input
+	if (!scriptBody || typeof scriptBody !== 'string' || scriptBody.trim().length === 0) {
+		throw new Error('Script body must be a non-empty string');
+	}
 
 	const browser = await getBrowser();
 	const page = await createPage(browser, timeout);
@@ -191,13 +250,23 @@ export async function runPageScript<T = unknown>(
 		}, scriptBody);
 
 		return result as T;
+	} catch (error) {
+		if (error instanceof Error) {
+			throw new Error(`Script execution failed: ${error.message}`);
+		}
+		throw error;
 	} finally {
 		await page.close();
 	}
 }
 
 /**
- * Check if Puppeteer is available and working
+ * Check if Puppeteer is available and working.
+ * 
+ * Attempts to create a browser instance to verify Puppeteer
+ * is properly installed and configured.
+ * 
+ * @returns {Promise<boolean>} True if Puppeteer is available, false otherwise
  */
 export async function isPuppeteerAvailable(): Promise<boolean> {
 	try {

@@ -7,8 +7,13 @@ import type {
 } from 'n8n-workflow';
 
 /**
- * Credential type for OpenAI-compatible APIs
- * Supports OpenAI, OpenRouter, Together AI, Groq, and other compatible providers
+ * Credential type for OpenAI-compatible APIs.
+ * 
+ * Supports OpenAI, OpenRouter, Together AI, Groq, and other compatible providers.
+ * Allows configuration of API key and base URL for flexible LLM provider selection.
+ * 
+ * @class OpenAICompatibleApi
+ * @implements {ICredentialType}
  */
 export class OpenAICompatibleApi implements ICredentialType {
 	name = 'openAICompatibleApi';

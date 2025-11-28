@@ -4,10 +4,11 @@
  */
 
 import type { StrategyResult } from '../utils/types';
-import { extractTextContent } from '../utils/extraction';
+import { extractTextContent, validateUrl } from '../utils/extraction';
+import { DEFAULT_FLARESOLVERR_TIMEOUT } from '../utils/config';
 
 // Default timeout for FlareSolverr (challenges can take time)
-const DEFAULT_TIMEOUT = 60000;
+const DEFAULT_TIMEOUT = DEFAULT_FLARESOLVERR_TIMEOUT;
 
 /**
  * FlareSolverr response structure
@@ -37,13 +38,31 @@ interface FlareSolverrResponse {
 }
 
 /**
- * Fetch a URL using FlareSolverr to bypass Cloudflare
+ * Fetch a URL using FlareSolverr to bypass Cloudflare.
+ * 
+ * Uses FlareSolverr proxy service to solve Cloudflare challenges
+ * and retrieve protected content.
+ * 
+ * @param {string} url - The URL to fetch
+ * @param {string} flareSolverrUrl - FlareSolverr service URL
+ * @param {number} maxTimeout - Maximum timeout in milliseconds
+ * @returns {Promise<StrategyResult>} Result containing HTML and text content
  */
 export async function flareSolverrFetch(
 	url: string,
 	flareSolverrUrl: string,
 	maxTimeout: number = DEFAULT_TIMEOUT,
 ): Promise<StrategyResult> {
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			success: false,
+			data: null,
+			error: urlValidation.error || 'Invalid URL',
+		};
+	}
+
 	try {
 		const response = await fetch(flareSolverrUrl, {
 			method: 'POST',
@@ -117,7 +136,12 @@ export async function flareSolverrFetch(
 }
 
 /**
- * Check if FlareSolverr is available at the given URL
+ * Check if FlareSolverr is available at the given URL.
+ * 
+ * Performs a health check on the FlareSolverr service.
+ * 
+ * @param {string} flareSolverrUrl - FlareSolverr service URL
+ * @returns {Promise<boolean>} True if service is available, false otherwise
  */
 export async function isFlareSolverrAvailable(flareSolverrUrl: string): Promise<boolean> {
 	try {

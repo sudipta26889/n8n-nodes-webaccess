@@ -39,6 +39,7 @@ import {
 	extractProductsFromHtml,
 	extractAssetUrls,
 	getContactPageUrls,
+	validateUrl,
 } from './utils/extraction';
 import {
 	inferTaskIntent,
@@ -47,15 +48,23 @@ import {
 	wantsFullPageScreenshot,
 	getAssetTypeFromTask,
 } from './utils/taskIntent';
-
-// Maximum assets to download
-const MAX_ASSETS = 50;
-
-// Maximum crawl candidates to inspect
-const MAX_CRAWL_CANDIDATES = 20;
+import {
+	MAX_ASSETS,
+	MAX_CRAWL_CANDIDATES,
+	DEFAULT_CRAWL4AI_BASE_URL,
+	MAX_PRODUCTS,
+} from './utils/config';
 
 /**
- * Extract data based on task intent
+ * Extract data based on task intent.
+ * 
+ * Analyzes the task intent and extracts relevant data from HTML and text.
+ * Supports email, phone, text dump, and product list extraction.
+ * 
+ * @param {string} html - HTML content to extract from
+ * @param {string} text - Plain text content to extract from
+ * @param {TaskIntent} intent - Task intent indicating what to extract
+ * @returns {{ success: boolean; data: Record<string, unknown> | null }} Extraction result
  */
 function extractByIntent(
 	html: string,
@@ -110,8 +119,25 @@ function extractByIntent(
 }
 
 /**
- * Handle fetchContent operation
- * Pipeline: HTTP → FlareSolverr (if Cloudflare) → Puppeteer → Crawl4AI BM25 → LLM (Crawl4AI or OpenAI-compatible)
+ * Handle fetchContent operation.
+ * 
+ * Implements a cost-aware pipeline that tries multiple strategies in order:
+ * 1. HTTP fetch (fastest, cheapest)
+ * 2. FlareSolverr (if configured, for Cloudflare bypass)
+ * 3. Puppeteer (for JS-heavy pages)
+ * 4. Crawl4AI BM25 (semantic search, no LLM)
+ * 5. LLM extraction (Crawl4AI or OpenAI-compatible, most expensive)
+ * 
+ * @param {string} url - URL to fetch content from
+ * @param {string} task - Task description for extraction
+ * @param {boolean} useAI - Whether to allow LLM extraction
+ * @param {string} crawl4aiBaseUrl - Crawl4AI service base URL
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @param {string} [aiProvider] - AI provider ('crawl4ai' or 'openai-compatible')
+ * @param {string} [aiModel] - AI model name
+ * @param {OpenAIConfig} [openAiConfig] - OpenAI-compatible API configuration
+ * @param {string} [flareSolverrUrl] - FlareSolverr service URL
+ * @returns {Promise<{ json: WebAccessResultJson }>} Result with extracted data
  */
 async function handleFetchContent(
 	url: string,
@@ -124,6 +150,22 @@ async function handleFetchContent(
 	openAiConfig?: OpenAIConfig,
 	flareSolverrUrl?: string,
 ): Promise<{ json: WebAccessResultJson }> {
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			json: {
+				url,
+				operation: 'fetchContent',
+				task,
+				success: false,
+				data: null,
+				error: urlValidation.error || 'Invalid URL',
+				meta,
+			},
+		};
+	}
+
 	const intent = inferTaskIntent(task, 'fetchContent');
 	let html = '';
 	let text = '';
@@ -331,13 +373,37 @@ async function handleFetchContent(
 }
 
 /**
- * Handle screenshot operation
+ * Handle screenshot operation.
+ * 
+ * Captures a screenshot of the specified URL using Puppeteer.
+ * Supports both viewport and full-page screenshots.
+ * 
+ * @param {string} url - URL to screenshot
+ * @param {string} task - Task description (may indicate full page)
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @returns {Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }>} Result with screenshot binary data
  */
 async function handleScreenshot(
 	url: string,
 	task: string,
 	meta: WebAccessMeta,
 ): Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }> {
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			json: {
+				url,
+				operation: 'screenshot',
+				task,
+				success: false,
+				data: null,
+				error: urlValidation.error || 'Invalid URL',
+				meta,
+			},
+		};
+	}
+
 	const fullPage = wantsFullPageScreenshot(task);
 	meta.usedPuppeteer = true;
 
@@ -379,8 +445,16 @@ async function handleScreenshot(
 }
 
 /**
- * Handle downloadAssets operation
- * Supports multi-page crawling when assets aren't found on the initial page
+ * Handle downloadAssets operation.
+ * 
+ * Downloads assets (PDFs, images, CSV files) from a webpage.
+ * Supports multi-page crawling when assets aren't found on the initial page.
+ * 
+ * @param {string} url - URL to download assets from
+ * @param {string} task - Task description indicating asset type
+ * @param {string} crawl4aiBaseUrl - Crawl4AI service base URL
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @returns {Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }>} Result with downloaded assets
  */
 async function handleDownloadAssets(
 	url: string,
@@ -388,6 +462,22 @@ async function handleDownloadAssets(
 	crawl4aiBaseUrl: string,
 	meta: WebAccessMeta,
 ): Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }> {
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			json: {
+				url,
+				operation: 'downloadAssets',
+				task,
+				success: false,
+				data: null,
+				error: urlValidation.error || 'Invalid URL',
+				meta,
+			},
+		};
+	}
+
 	const assetType = getAssetTypeFromTask(task) || 'pdf';
 	const allAssetUrls: string[] = [];
 	const seenUrls = new Set<string>();
@@ -573,8 +663,23 @@ async function handleDownloadAssets(
 }
 
 /**
- * Crawl for contact information (emails/phones)
- * Strategy: 1) Try common contact page URLs directly, 2) Try crawled candidates
+ * Crawl for contact information (emails/phones).
+ * 
+ * Strategy: 1) Try common contact page URLs directly (faster), 2) Try crawled candidates.
+ * 
+ * @param {string} baseUrl - Base URL to crawl from
+ * @param {string} task - Task description
+ * @param {string} subTask - Sub-task for individual page extraction
+ * @param {CrawledPage[]} candidates - List of candidate pages from crawling
+ * @param {boolean} useAI - Whether to allow LLM extraction
+ * @param {string} crawl4aiBaseUrl - Crawl4AI service base URL
+ * @param {TaskIntent} intent - Task intent indicating what to extract
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @param {string} [aiProvider] - AI provider
+ * @param {string} [aiModel] - AI model name
+ * @param {OpenAIConfig} [openAiConfig] - OpenAI-compatible API configuration
+ * @param {string} [flareSolverrUrl] - FlareSolverr service URL
+ * @returns {Promise<{ json: WebAccessResultJson }>} Result with contact information
  */
 async function crawlForContact(
 	baseUrl: string,
@@ -746,8 +851,21 @@ async function crawlForContact(
 }
 
 /**
- * Crawl for products
- * Uses full pipeline (HTTP → Puppeteer → Crawl4AI BM25 → LLM) for each candidate page
+ * Crawl for products.
+ * 
+ * Uses full pipeline (HTTP → Puppeteer → Crawl4AI BM25 → LLM) for each candidate page.
+ * 
+ * @param {string} baseUrl - Base URL to crawl from
+ * @param {string} task - Task description
+ * @param {CrawledPage[]} candidates - List of candidate pages from crawling
+ * @param {boolean} useAI - Whether to allow LLM extraction
+ * @param {string} crawl4aiBaseUrl - Crawl4AI service base URL
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @param {string} [aiProvider] - AI provider
+ * @param {string} [aiModel] - AI model name
+ * @param {OpenAIConfig} [openAiConfig] - OpenAI-compatible API configuration
+ * @param {string} [flareSolverrUrl] - FlareSolverr service URL
+ * @returns {Promise<{ json: WebAccessResultJson }>} Result with product list
  */
 async function crawlForProducts(
 	baseUrl: string,
@@ -801,7 +919,7 @@ async function crawlForProducts(
 		}
 
 		// Stop if we have enough products
-		if (allProducts.length >= 100) break;
+		if (allProducts.length >= MAX_PRODUCTS) break;
 	}
 
 	if (allProducts.length === 0) {
@@ -834,7 +952,21 @@ async function crawlForProducts(
 }
 
 /**
- * Handle crawl operation
+ * Handle crawl operation.
+ * 
+ * Crawls a website to discover and extract data from multiple pages.
+ * Supports contact extraction (emails/phones) and product listing.
+ * 
+ * @param {string} url - Starting URL for crawling
+ * @param {string} task - Task description
+ * @param {boolean} useAI - Whether to allow LLM extraction
+ * @param {string} crawl4aiBaseUrl - Crawl4AI service base URL
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @param {string} [aiProvider] - AI provider
+ * @param {string} [aiModel] - AI model name
+ * @param {OpenAIConfig} [openAiConfig] - OpenAI-compatible API configuration
+ * @param {string} [flareSolverrUrl] - FlareSolverr service URL
+ * @returns {Promise<{ json: WebAccessResultJson }>} Result with crawled data
  */
 async function handleCrawl(
 	url: string,
@@ -847,6 +979,22 @@ async function handleCrawl(
 	openAiConfig?: OpenAIConfig,
 	flareSolverrUrl?: string,
 ): Promise<{ json: WebAccessResultJson }> {
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			json: {
+				url,
+				operation: 'crawl',
+				task,
+				success: false,
+				data: null,
+				error: urlValidation.error || 'Invalid URL',
+				meta,
+			},
+		};
+	}
+
 	const intent = inferTaskIntent(task, 'crawl');
 	const subTask = generateSubTask(task, intent);
 
@@ -942,13 +1090,36 @@ async function handleCrawl(
 }
 
 /**
- * Handle runScript operation
+ * Handle runScript operation.
+ * 
+ * Executes custom JavaScript in the browser context on the specified URL.
+ * 
+ * @param {string} url - URL to run script on
+ * @param {string} task - JavaScript code to execute
+ * @param {WebAccessMeta} meta - Metadata object to track used strategies
+ * @returns {Promise<{ json: WebAccessResultJson }>} Result with script execution output
  */
 async function handleRunScript(
 	url: string,
 	task: string,
 	meta: WebAccessMeta,
 ): Promise<{ json: WebAccessResultJson }> {
+	// Validate URL
+	const urlValidation = validateUrl(url);
+	if (!urlValidation.valid) {
+		return {
+			json: {
+				url,
+				operation: 'runScript',
+				task,
+				success: false,
+				data: null,
+				error: urlValidation.error || 'Invalid URL',
+				meta,
+			},
+		};
+	}
+
 	meta.usedPuppeteer = true;
 
 	try {
@@ -980,7 +1151,12 @@ async function handleRunScript(
 }
 
 /**
- * Process a single URL based on operation
+ * Process a single URL based on operation.
+ * 
+ * Routes the request to the appropriate handler based on the operation type.
+ * 
+ * @param {ProcessUrlContext} context - Processing context with URL, operation, and configuration
+ * @returns {Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }>} Processing result
  */
 async function processUrl(
 	context: ProcessUrlContext,
@@ -1248,7 +1424,7 @@ export class WebAccess implements INodeType {
 				displayName: 'Crawl4AI Base URL',
 				name: 'crawl4aiBaseUrl',
 				type: 'string',
-				default: 'http://157.173.126.92:11235',
+				default: DEFAULT_CRAWL4AI_BASE_URL,
 				required: true,
 				description: 'Base URL for the Crawl4AI HTTP API',
 			},

@@ -4,9 +4,10 @@
  */
 
 import type { OpenAIConfig } from '../utils/types';
+import { DEFAULT_OPENAI_TIMEOUT, MAX_CONTENT_LENGTH_FOR_LLM } from '../utils/config';
 
 // Default timeout in milliseconds
-const DEFAULT_TIMEOUT = 60000;
+const DEFAULT_TIMEOUT = DEFAULT_OPENAI_TIMEOUT;
 
 /**
  * Response structure from OpenAI chat completions API
@@ -32,7 +33,15 @@ interface ChatCompletionResponse {
 }
 
 /**
- * Extract information from text using OpenAI-compatible API
+ * Extract information from text using OpenAI-compatible API.
+ * 
+ * Uses chat completions API to extract information based on task description.
+ * 
+ * @param {OpenAIConfig} config - OpenAI-compatible API configuration
+ * @param {string} model - Model name to use
+ * @param {string} pageContent - Web page content to extract from
+ * @param {string} task - Task description for extraction
+ * @returns {Promise<{ success: boolean; text?: string; error?: string }>} Extraction result
  */
 export async function openaiExtract(
 	config: OpenAIConfig,
@@ -43,10 +52,9 @@ export async function openaiExtract(
 	const { apiKey, baseUrl } = config;
 
 	// Truncate content if too long (most models have context limits)
-	const maxContentLength = 30000;
 	const truncatedContent =
-		pageContent.length > maxContentLength
-			? pageContent.substring(0, maxContentLength) + '\n\n[Content truncated...]'
+		pageContent.length > MAX_CONTENT_LENGTH_FOR_LLM
+			? pageContent.substring(0, MAX_CONTENT_LENGTH_FOR_LLM) + '\n\n[Content truncated...]'
 			: pageContent;
 
 	const systemPrompt = `You are a data extraction assistant. Your task is to extract specific information from web page content based on the user's request.
@@ -115,7 +123,16 @@ Extract the requested information:`;
 }
 
 /**
- * Extract contact information (emails/phones) using OpenAI
+ * Extract contact information (emails/phones) using OpenAI.
+ * 
+ * Specialized function for extracting contact information with structured JSON output.
+ * 
+ * @param {OpenAIConfig} config - OpenAI-compatible API configuration
+ * @param {string} model - Model name to use
+ * @param {string} pageContent - Web page content to extract from
+ * @param {boolean} wantsEmail - Whether to extract email addresses
+ * @param {boolean} wantsPhone - Whether to extract phone numbers
+ * @returns {Promise<{ emails?: string[]; phones?: string[]; error?: string }>} Contact extraction result
  */
 export async function openaiExtractContacts(
 	config: OpenAIConfig,
@@ -127,10 +144,9 @@ export async function openaiExtractContacts(
 	const { apiKey, baseUrl } = config;
 
 	// Truncate content if too long
-	const maxContentLength = 30000;
 	const truncatedContent =
-		pageContent.length > maxContentLength
-			? pageContent.substring(0, maxContentLength) + '\n\n[Content truncated...]'
+		pageContent.length > MAX_CONTENT_LENGTH_FOR_LLM
+			? pageContent.substring(0, MAX_CONTENT_LENGTH_FOR_LLM) + '\n\n[Content truncated...]'
 			: pageContent;
 
 	const requestedInfo: string[] = [];

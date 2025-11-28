@@ -6,8 +6,14 @@
 import type { TaskIntent, WebAccessOperation } from './types';
 
 /**
- * Infer what the user wants to extract based on task description and operation
- * Uses keyword-based heuristics
+ * Infer what the user wants to extract based on task description and operation.
+ * 
+ * Uses keyword-based heuristics to determine extraction goals (emails, phones,
+ * products, text, assets, etc.).
+ * 
+ * @param {string} task - Task description from user
+ * @param {WebAccessOperation} operation - Operation type (fetchContent, crawl, etc.)
+ * @returns {TaskIntent} Intent object indicating what to extract
  */
 export function inferTaskIntent(task: string, operation: WebAccessOperation): TaskIntent {
 	const lowerTask = task.toLowerCase().trim();
@@ -103,7 +109,14 @@ export function inferTaskIntent(task: string, operation: WebAccessOperation): Ta
 }
 
 /**
- * Generate a sub-task for crawl candidate inspection based on parent task
+ * Generate a sub-task for crawl candidate inspection based on parent task.
+ * 
+ * Creates a focused sub-task for extracting specific information from
+ * individual pages during crawling.
+ * 
+ * @param {string} parentTask - Original task description
+ * @param {TaskIntent} intent - Task intent indicating what to extract
+ * @returns {string} Sub-task description for page-level extraction
  */
 export function generateSubTask(parentTask: string, intent: TaskIntent): string {
 	if (intent.wantsEmail) {
@@ -123,9 +136,14 @@ export function generateSubTask(parentTask: string, intent: TaskIntent): string 
 }
 
 /**
- * Score a crawled page based on task intent for candidate selection
- * Combines URL, title, and snippet signals for better ranking
- * Higher score = more likely to be relevant
+ * Score a crawled page based on task intent for candidate selection.
+ * 
+ * Combines URL, title, and snippet signals for better ranking.
+ * Higher score = more likely to be relevant to the task.
+ * 
+ * @param {{ url: string; title?: string; snippet?: string }} page - Page information to score
+ * @param {TaskIntent} intent - Task intent indicating what to extract
+ * @returns {number} Relevance score (higher is better)
  */
 export function scorePageForIntent(page: { url: string; title?: string; snippet?: string }, intent: TaskIntent): number {
 	const lowerUrl = page.url.toLowerCase();
@@ -242,17 +260,14 @@ export function scorePageForIntent(page: { url: string; title?: string; snippet?
 	return score;
 }
 
-/**
- * @deprecated Use scorePageForIntent instead
- * Score a URL based on task intent for crawl candidate selection
- * Higher score = more likely to be relevant
- */
-export function scoreUrlForIntent(url: string, intent: TaskIntent): number {
-	return scorePageForIntent({ url }, intent);
-}
 
 /**
- * Detect if task implies full-page screenshot
+ * Detect if task implies full-page screenshot.
+ * 
+ * Checks task description for keywords indicating full-page screenshot is desired.
+ * 
+ * @param {string} task - Task description
+ * @returns {boolean} True if full-page screenshot is requested
  */
 export function wantsFullPageScreenshot(task: string): boolean {
 	const lowerTask = task.toLowerCase();
@@ -266,7 +281,12 @@ export function wantsFullPageScreenshot(task: string): boolean {
 }
 
 /**
- * Determine asset type from task for downloadAssets operation
+ * Determine asset type from task for downloadAssets operation.
+ * 
+ * Analyzes task description to determine what type of assets to download.
+ * 
+ * @param {string} task - Task description
+ * @returns {'pdf' | 'image' | 'csv' | null} Asset type or null if not specified
  */
 export function getAssetTypeFromTask(task: string): 'pdf' | 'image' | 'csv' | null {
 	const lowerTask = task.toLowerCase();

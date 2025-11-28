@@ -68,7 +68,7 @@ The node must:
 
 3. **Crawl4AI Service**
    - Running on the same VPS at:
-     - `http://157.173.126.92:11235`
+     - `http://127.0.0.1:11235`
    - Exposes endpoints:
      - `POST /crawl`
      - `POST /crawl/stream`
@@ -191,7 +191,7 @@ The node must:
 - **Display Name:** `Crawl4AI Base URL`
 - **Name:** `crawl4aiBaseUrl`
 - **Type:** `string`
-- **Default:** `http://157.173.126.92:11235`
+- **Default:** `http://127.0.0.1:11235`
 - **Required:** true
 - **Description:** Base URL for the Crawl4AI HTTP API. In v1 this is normally left as default but is configurable for flexibility.
 
@@ -656,7 +656,7 @@ Implement in `src/utils/extraction.ts`:
 ### 6.1 Base URL
 
 - Configurable via parameter `crawl4aiBaseUrl`.
-- Default: `http://157.173.126.92:11235`.
+- Default: `http://127.0.0.1:11235`.
 
 In code:
 
