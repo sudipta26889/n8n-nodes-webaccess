@@ -51,6 +51,7 @@ export interface WebAccessMeta {
 	usedPuppeteer?: boolean;
 	usedCrawl4ai?: boolean;
 	usedCrawl4aiLlm?: boolean;
+	usedFlareSolverr?: boolean;
 	aiProvider?: string;
 	aiModel?: string;
 }
@@ -82,6 +83,7 @@ export interface ProcessUrlContext {
 	aiModel?: string;
 	crawl4aiBaseUrl: string;
 	openAiConfig?: OpenAIConfig;
+	flareSolverrUrl?: string;
 }
 
 // Internal processing result (includes optional binary)

@@ -17,6 +17,7 @@ import { httpFetch, downloadAsset } from './strategies/http';
 import { getPageContent, captureScreenshot, runPageScript, closeBrowser } from './strategies/puppeteer';
 import { crawl4aiQuery, crawl4aiCrawl } from './strategies/crawl4ai';
 import { openaiExtract, openaiExtractContacts } from './strategies/openai';
+import { flareSolverrFetch } from './strategies/flaresolverr';
 
 // Import utilities
 import type {
@@ -110,7 +111,7 @@ function extractByIntent(
 
 /**
  * Handle fetchContent operation
- * Pipeline: HTTP → Puppeteer → Crawl4AI BM25 → LLM (Crawl4AI or OpenAI-compatible)
+ * Pipeline: HTTP → FlareSolverr (if Cloudflare) → Puppeteer → Crawl4AI BM25 → LLM (Crawl4AI or OpenAI-compatible)
  */
 async function handleFetchContent(
 	url: string,
@@ -121,10 +122,12 @@ async function handleFetchContent(
 	aiProvider?: string,
 	aiModel?: string,
 	openAiConfig?: OpenAIConfig,
+	flareSolverrUrl?: string,
 ): Promise<{ json: WebAccessResultJson }> {
 	const intent = inferTaskIntent(task, 'fetchContent');
 	let html = '';
 	let text = '';
+	let wasCloudflareBlocked = false;
 
 	// Stage 1: Try HTTP fetch
 	const httpResult = await httpFetch(url);
@@ -146,6 +149,32 @@ async function handleFetchContent(
 					meta,
 				},
 			};
+		}
+	} else if (httpResult.error?.includes('blocked') || httpResult.error?.includes('CAPTCHA')) {
+		wasCloudflareBlocked = true;
+	}
+
+	// Stage 1.5: If blocked and FlareSolverr is configured, try it
+	if (flareSolverrUrl && (wasCloudflareBlocked || !httpResult.success)) {
+		const flareResult = await flareSolverrFetch(url, flareSolverrUrl);
+		if (flareResult.success && flareResult.html) {
+			meta.usedFlareSolverr = true;
+			html = flareResult.html;
+			text = flareResult.text || extractTextContent(html);
+
+			const extracted = extractByIntent(html, text, intent);
+			if (extracted.success) {
+				return {
+					json: {
+						url,
+						operation: 'fetchContent',
+						task,
+						success: true,
+						data: extracted.data,
+						meta,
+					},
+				};
+			}
 		}
 	}
 
@@ -506,6 +535,7 @@ async function crawlForContact(
 	aiProvider?: string,
 	aiModel?: string,
 	openAiConfig?: OpenAIConfig,
+	flareSolverrUrl?: string,
 ): Promise<{ json: WebAccessResultJson }> {
 	const allEmails: string[] = [];
 	const allPhones: string[] = [];
@@ -535,6 +565,7 @@ async function crawlForContact(
 				aiProvider,
 				aiModel,
 				openAiConfig,
+				flareSolverrUrl,
 			);
 
 			if (result.json.success && result.json.data) {
@@ -585,6 +616,7 @@ async function crawlForContact(
 				aiProvider,
 				aiModel,
 				openAiConfig,
+				flareSolverrUrl,
 			);
 
 			if (result.json.success && result.json.data) {
@@ -743,6 +775,7 @@ async function handleCrawl(
 	aiProvider?: string,
 	aiModel?: string,
 	openAiConfig?: OpenAIConfig,
+	flareSolverrUrl?: string,
 ): Promise<{ json: WebAccessResultJson }> {
 	const intent = inferTaskIntent(task, 'crawl');
 	const subTask = generateSubTask(task, intent);
@@ -753,7 +786,7 @@ async function handleCrawl(
 		// First attempt: try common contact pages directly without crawling
 		const quickResult = await crawlForContact(
 			url, task, subTask, [], useAI, crawl4aiBaseUrl, intent, { ...meta },
-			aiProvider, aiModel, openAiConfig,
+			aiProvider, aiModel, openAiConfig, flareSolverrUrl,
 		);
 
 		// If we found data, return early
@@ -777,7 +810,7 @@ async function handleCrawl(
 
 			return crawlForContact(
 				url, task, subTask, scoredPages, useAI, crawl4aiBaseUrl, intent, meta,
-				aiProvider, aiModel, openAiConfig,
+				aiProvider, aiModel, openAiConfig, flareSolverrUrl,
 			);
 		}
 
@@ -879,7 +912,7 @@ async function handleRunScript(
 async function processUrl(
 	context: ProcessUrlContext,
 ): Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }> {
-	const { url, operation, task, useAI, aiProvider, aiModel, crawl4aiBaseUrl, openAiConfig } = context;
+	const { url, operation, task, useAI, aiProvider, aiModel, crawl4aiBaseUrl, openAiConfig, flareSolverrUrl } = context;
 
 	const meta: WebAccessMeta = {
 		aiProvider,
@@ -888,7 +921,7 @@ async function processUrl(
 
 	switch (operation) {
 		case 'fetchContent':
-			return handleFetchContent(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig);
+			return handleFetchContent(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig, flareSolverrUrl);
 
 		case 'screenshot':
 			return handleScreenshot(url, task, meta);
@@ -897,7 +930,7 @@ async function processUrl(
 			return handleDownloadAssets(url, task, meta);
 
 		case 'crawl':
-			return handleCrawl(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig);
+			return handleCrawl(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig, flareSolverrUrl);
 
 		case 'runScript':
 			return handleRunScript(url, task, meta);
@@ -1146,6 +1179,15 @@ export class WebAccess implements INodeType {
 				required: true,
 				description: 'Base URL for the Crawl4AI HTTP API',
 			},
+			// FlareSolverr URL (optional, for Cloudflare bypass)
+			{
+				displayName: 'FlareSolverr URL',
+				name: 'flareSolverrUrl',
+				type: 'string',
+				default: '',
+				description: 'Optional: FlareSolverr proxy URL to bypass Cloudflare protection. Leave empty to disable. Example: http://localhost:8191/v1',
+				placeholder: 'http://localhost:8191/v1',
+			},
 		],
 	};
 
@@ -1155,6 +1197,7 @@ export class WebAccess implements INodeType {
 
 		// Read global parameters
 		const crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
+		const flareSolverrUrl = (this.getNodeParameter('flareSolverrUrl', 0) as string) || undefined;
 		const useAI = this.getNodeParameter('useAI', 0) as boolean;
 		const aiProvider = useAI ? (this.getNodeParameter('aiProvider', 0) as string) : undefined;
 
@@ -1199,6 +1242,7 @@ export class WebAccess implements INodeType {
 							aiModel,
 							crawl4aiBaseUrl,
 							openAiConfig,
+							flareSolverrUrl,
 						};
 
 						const result = await processUrl(context);
