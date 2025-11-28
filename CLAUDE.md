@@ -33,11 +33,18 @@ The node supports five operations:
 Each operation follows a progressive pipeline that attempts cheaper methods first:
 
 1. **HTTP Stage** (`strategies/http.ts`): Simple HTTP fetch with fetch API
-2. **Puppeteer Stage** (`strategies/puppeteer.ts`): Browser automation for JS-heavy pages
-3. **Crawl4AI BM25** (`strategies/crawl4ai.ts`): Semantic search without LLM
-4. **LLM Stage** (`strategies/openai.ts` or Crawl4AI internal): AI-powered extraction as last resort
+2. **FlareSolverr Stage** (`strategies/flaresolverr.ts`): Cloudflare bypass when needed
+3. **Puppeteer Stage** (`strategies/puppeteer.ts`): Browser automation for JS-heavy pages
+4. **Crawl4AI BM25** (`strategies/crawl4ai.ts`): Semantic search without LLM
+5. **LLM Stage** (`strategies/openai.ts` or Crawl4AI internal): AI-powered extraction as last resort
 
 The pipeline exits early when data is successfully extracted, minimizing cost and latency.
+
+**Product Crawl**: Uses full pipeline for each candidate page (not just HTTP→Puppeteer), enabling AI-powered product discovery.
+
+**Asset Download**: Supports multi-page crawling, checking up to 10 crawled pages when initial page lacks assets.
+
+**Candidate Ranking**: Uses `scorePageForIntent()` combining URL (10pts), title (7pts), and snippet (3pts) signals for better page selection.
 
 ### Project Structure
 
