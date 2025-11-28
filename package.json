@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-webaccess",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "Cost-aware universal web access node for n8n (HTTP, Puppeteer, Crawl4AI)",
 	"license": "MIT",
 	"homepage": "https://github.com/sudipta26889/n8n-nodes-webaccess",
@@ -25,8 +25,7 @@
 		"dev": "n8n-node dev",
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
-		"release": "n8n-node release",
-		"prepublishOnly": "n8n-node prerelease"
+		"release": "n8n-node release"
 	},
 	"files": [
 		"dist"
