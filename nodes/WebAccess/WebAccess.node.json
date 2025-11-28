@@ -1,0 +1,13 @@
+{
+	"node": "n8n-nodes-webaccess.webAccess",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Data & Storage", "Utility"],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/n8n-io/n8n-nodes-starter"
+			}
+		]
+	}
+}
