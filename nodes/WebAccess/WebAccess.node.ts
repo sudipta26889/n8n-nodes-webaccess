@@ -51,7 +51,6 @@ import {
 import {
 	MAX_ASSETS,
 	MAX_CRAWL_CANDIDATES,
-	DEFAULT_CRAWL4AI_BASE_URL,
 	MAX_PRODUCTS,
 } from './utils/config';
 
@@ -1273,6 +1272,10 @@ export class WebAccess implements INodeType {
 		usableAsTool: true,
 		credentials: [
 			{
+				name: 'webAccessApi',
+				required: true,
+			},
+			{
 				name: 'openAICompatibleApi',
 				required: false,
 				displayOptions: {
@@ -1405,24 +1408,6 @@ export class WebAccess implements INodeType {
 				],
 				description: 'The model to use for extraction. Select from list or enter model ID manually.',
 			},
-			// Crawl4AI Base URL
-			{
-				displayName: 'Crawl4AI Base URL',
-				name: 'crawl4aiBaseUrl',
-				type: 'string',
-				default: DEFAULT_CRAWL4AI_BASE_URL,
-				required: true,
-				description: 'Base URL for the Crawl4AI HTTP API',
-			},
-			// FlareSolverr URL (optional, for Cloudflare bypass)
-			{
-				displayName: 'FlareSolverr URL',
-				name: 'flareSolverrUrl',
-				type: 'string',
-				default: '',
-				description: 'Optional: FlareSolverr proxy URL to bypass Cloudflare protection. Leave empty to disable. Example: http://localhost:8191/v1',
-				placeholder: 'http://localhost:8191/v1',
-			},
 		],
 	};
 
@@ -1430,9 +1415,12 @@ export class WebAccess implements INodeType {
 		const items = this.getInputData();
 		const returnItems: INodeExecutionData[] = [];
 
-		// Read global parameters
-		const crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
-		const flareSolverrUrl = (this.getNodeParameter('flareSolverrUrl', 0) as string) || undefined;
+		// Read Web Access credentials
+		const webAccessCredentials = await this.getCredentials('webAccessApi');
+		const crawl4aiBaseUrl = webAccessCredentials.crawl4aiBaseUrl as string;
+		const flareSolverrUrl = (webAccessCredentials.flareSolverrUrl as string) || undefined;
+
+		// Read AI provider setting
 		const aiProvider = this.getNodeParameter('aiProvider', 0) as string;
 		const useAI = aiProvider !== 'none';
 
