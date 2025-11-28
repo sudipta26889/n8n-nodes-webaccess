@@ -665,12 +665,17 @@ async function crawlForContact(
 				subTask,
 				useAI,
 				crawl4aiBaseUrl,
-				{ ...meta },
+				meta,
 				aiProvider,
 				aiModel,
 				openAiConfig,
 				flareSolverrUrl,
 			);
+
+			// Merge meta flags from candidate processing
+			if (result.json.meta) {
+				Object.assign(meta, result.json.meta);
+			}
 
 			if (result.json.success && result.json.data) {
 				const pageData: { url: string; emails?: string[]; phones?: string[] } = {
@@ -767,12 +772,17 @@ async function crawlForProducts(
 			task,
 			useAI,
 			crawl4aiBaseUrl,
-			{ ...meta },
+			meta,
 			aiProvider,
 			aiModel,
 			openAiConfig,
 			flareSolverrUrl,
 		);
+
+		// Merge meta flags from candidate processing
+		if (result.json.meta) {
+			Object.assign(meta, result.json.meta);
+		}
 
 		// Extract products from successful result
 		if (result.json.success && result.json.data) {
