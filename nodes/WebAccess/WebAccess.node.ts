@@ -5,6 +5,8 @@ import type {
 	INodeTypeDescription,
 	IBinaryData,
 	IDataObject,
+	ILoadOptionsFunctions,
+	INodeListSearchResult,
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 // eslint-disable-next-line @n8n/community-nodes/no-restricted-imports -- Required for asset bundling in self-hosted deployments
@@ -14,6 +16,7 @@ import JSZip from 'jszip';
 import { httpFetch, downloadAsset } from './strategies/http';
 import { getPageContent, captureScreenshot, runPageScript, closeBrowser } from './strategies/puppeteer';
 import { crawl4aiQuery, crawl4aiCrawl } from './strategies/crawl4ai';
+import { openaiExtract, openaiExtractContacts } from './strategies/openai';
 
 // Import utilities
 import type {
@@ -25,6 +28,7 @@ import type {
 	CrawledPage,
 	ProductSummary,
 	AssetType,
+	OpenAIConfig,
 } from './utils/types';
 import {
 	extractEmails,
@@ -106,7 +110,7 @@ function extractByIntent(
 
 /**
  * Handle fetchContent operation
- * Pipeline: HTTP → Puppeteer → Crawl4AI BM25 → Crawl4AI LLM (if useAI)
+ * Pipeline: HTTP → Puppeteer → Crawl4AI BM25 → LLM (Crawl4AI or OpenAI-compatible)
  */
 async function handleFetchContent(
 	url: string,
@@ -114,6 +118,9 @@ async function handleFetchContent(
 	useAI: boolean,
 	crawl4aiBaseUrl: string,
 	meta: WebAccessMeta,
+	aiProvider?: string,
+	aiModel?: string,
+	openAiConfig?: OpenAIConfig,
 ): Promise<{ json: WebAccessResultJson }> {
 	const intent = inferTaskIntent(task, 'fetchContent');
 	let html = '';
@@ -186,41 +193,97 @@ async function handleFetchContent(
 		}
 	}
 
-	// Stage 4: Try Crawl4AI LLM (only if useAI is true)
+	// Stage 4: Try LLM extraction (only if useAI is true)
 	if (useAI) {
-		const llmResult = await crawl4aiQuery(crawl4aiBaseUrl, url, task, true);
-		if (llmResult.success && llmResult.text) {
-			meta.usedCrawl4aiLlm = true;
+		// Use OpenAI-compatible API if configured
+		if (aiProvider === 'openai-compatible' && openAiConfig && aiModel) {
+			meta.aiProvider = 'openai-compatible';
+			meta.aiModel = aiModel;
 
-			// Try extraction from LLM response
-			const extracted = extractByIntent(llmResult.text, llmResult.text, intent);
-			if (extracted.success) {
+			// Use page text for LLM extraction
+			const contentForLlm = text || extractTextContent(html);
+
+			// For contact extraction, use specialized function
+			if (intent.wantsEmail || intent.wantsPhone) {
+				const contactResult = await openaiExtractContacts(
+					openAiConfig,
+					aiModel,
+					contentForLlm,
+					!!intent.wantsEmail,
+					!!intent.wantsPhone,
+				);
+
+				if (contactResult.emails?.length || contactResult.phones?.length) {
+					const data: Record<string, unknown> = { pageTitle: extractPageTitle(html) };
+					if (contactResult.emails?.length) data.emails = contactResult.emails;
+					if (contactResult.phones?.length) data.phones = contactResult.phones;
+
+					return {
+						json: {
+							url,
+							operation: 'fetchContent',
+							task,
+							success: true,
+							data,
+							meta,
+						},
+					};
+				}
+			}
+
+			// General extraction
+			const llmResult = await openaiExtract(openAiConfig, aiModel, contentForLlm, task);
+			if (llmResult.success && llmResult.text) {
 				return {
 					json: {
 						url,
 						operation: 'fetchContent',
 						task,
 						success: true,
-						data: extracted.data,
+						data: {
+							rawAnswer: llmResult.text,
+							pageTitle: extractPageTitle(html),
+						},
 						meta,
 					},
 				};
 			}
+		} else {
+			// Fall back to Crawl4AI LLM
+			const llmResult = await crawl4aiQuery(crawl4aiBaseUrl, url, task, true);
+			if (llmResult.success && llmResult.text) {
+				meta.usedCrawl4aiLlm = true;
 
-			// Return raw LLM answer
-			return {
-				json: {
-					url,
-					operation: 'fetchContent',
-					task,
-					success: true,
-					data: {
-						rawAnswer: llmResult.text,
-						pageTitle: extractPageTitle(html),
+				// Try extraction from LLM response
+				const extracted = extractByIntent(llmResult.text, llmResult.text, intent);
+				if (extracted.success) {
+					return {
+						json: {
+							url,
+							operation: 'fetchContent',
+							task,
+							success: true,
+							data: extracted.data,
+							meta,
+						},
+					};
+				}
+
+				// Return raw LLM answer
+				return {
+					json: {
+						url,
+						operation: 'fetchContent',
+						task,
+						success: true,
+						data: {
+							rawAnswer: llmResult.text,
+							pageTitle: extractPageTitle(html),
+						},
+						meta,
 					},
-					meta,
-				},
-			};
+				};
+			}
 		}
 	}
 
@@ -440,6 +503,9 @@ async function crawlForContact(
 	crawl4aiBaseUrl: string,
 	intent: TaskIntent,
 	meta: WebAccessMeta,
+	aiProvider?: string,
+	aiModel?: string,
+	openAiConfig?: OpenAIConfig,
 ): Promise<{ json: WebAccessResultJson }> {
 	const allEmails: string[] = [];
 	const allPhones: string[] = [];
@@ -466,6 +532,9 @@ async function crawlForContact(
 				useAI,
 				crawl4aiBaseUrl,
 				{ ...meta },
+				aiProvider,
+				aiModel,
+				openAiConfig,
 			);
 
 			if (result.json.success && result.json.data) {
@@ -513,6 +582,9 @@ async function crawlForContact(
 				useAI,
 				crawl4aiBaseUrl,
 				{ ...meta },
+				aiProvider,
+				aiModel,
+				openAiConfig,
 			);
 
 			if (result.json.success && result.json.data) {
@@ -668,6 +740,9 @@ async function handleCrawl(
 	useAI: boolean,
 	crawl4aiBaseUrl: string,
 	meta: WebAccessMeta,
+	aiProvider?: string,
+	aiModel?: string,
+	openAiConfig?: OpenAIConfig,
 ): Promise<{ json: WebAccessResultJson }> {
 	const intent = inferTaskIntent(task, 'crawl');
 	const subTask = generateSubTask(task, intent);
@@ -676,7 +751,10 @@ async function handleCrawl(
 	// This is much faster and often sufficient
 	if (intent.wantsEmail || intent.wantsPhone) {
 		// First attempt: try common contact pages directly without crawling
-		const quickResult = await crawlForContact(url, task, subTask, [], useAI, crawl4aiBaseUrl, intent, { ...meta });
+		const quickResult = await crawlForContact(
+			url, task, subTask, [], useAI, crawl4aiBaseUrl, intent, { ...meta },
+			aiProvider, aiModel, openAiConfig,
+		);
 
 		// If we found data, return early
 		if (quickResult.json.success) {
@@ -697,7 +775,10 @@ async function handleCrawl(
 				.sort((a, b) => b.score - a.score)
 				.slice(0, MAX_CRAWL_CANDIDATES);
 
-			return crawlForContact(url, task, subTask, scoredPages, useAI, crawl4aiBaseUrl, intent, meta);
+			return crawlForContact(
+				url, task, subTask, scoredPages, useAI, crawl4aiBaseUrl, intent, meta,
+				aiProvider, aiModel, openAiConfig,
+			);
 		}
 
 		// Crawl failed, return the quickResult (which has the error message)
@@ -798,7 +879,7 @@ async function handleRunScript(
 async function processUrl(
 	context: ProcessUrlContext,
 ): Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }> {
-	const { url, operation, task, useAI, aiProvider, aiModel, crawl4aiBaseUrl } = context;
+	const { url, operation, task, useAI, aiProvider, aiModel, crawl4aiBaseUrl, openAiConfig } = context;
 
 	const meta: WebAccessMeta = {
 		aiProvider,
@@ -807,7 +888,7 @@ async function processUrl(
 
 	switch (operation) {
 		case 'fetchContent':
-			return handleFetchContent(url, task, useAI, crawl4aiBaseUrl, meta);
+			return handleFetchContent(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig);
 
 		case 'screenshot':
 			return handleScreenshot(url, task, meta);
@@ -816,7 +897,7 @@ async function processUrl(
 			return handleDownloadAssets(url, task, meta);
 
 		case 'crawl':
-			return handleCrawl(url, task, useAI, crawl4aiBaseUrl, meta);
+			return handleCrawl(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig);
 
 		case 'runScript':
 			return handleRunScript(url, task, meta);
@@ -837,6 +918,63 @@ async function processUrl(
 }
 
 export class WebAccess implements INodeType {
+	methods = {
+		listSearch: {
+			async listModels(
+				this: ILoadOptionsFunctions,
+				filter?: string,
+			): Promise<INodeListSearchResult> {
+				try {
+					const credentials = await this.getCredentials('openAICompatibleApi');
+					const baseUrl = (credentials.baseUrl as string) || 'https://api.openai.com/v1';
+					const apiKey = credentials.apiKey as string;
+
+					const response = await this.helpers.httpRequest({
+						method: 'GET',
+						url: `${baseUrl}/models`,
+						headers: {
+							Authorization: `Bearer ${apiKey}`,
+						},
+					});
+
+					// OpenAI API returns { data: [{ id, object, created, owned_by }] }
+					const models = response.data || [];
+
+					// Sort models alphabetically
+					const sortedModels = models
+						.map((model: { id: string; owned_by?: string }) => ({
+							name: model.id,
+							value: model.id,
+							description: model.owned_by ? `Owned by: ${model.owned_by}` : undefined,
+						}))
+						.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name));
+
+					// Filter if search term provided
+					const filteredModels = filter
+						? sortedModels.filter((model: { name: string }) =>
+								model.name.toLowerCase().includes(filter.toLowerCase()),
+							)
+						: sortedModels;
+
+					return {
+						results: filteredModels,
+					};
+				} catch (error) {
+					// Return empty list on error with helpful message
+					return {
+						results: [
+							{
+								name: 'Error Loading Models - Check Credentials',
+								value: 'gpt-4o-mini',
+								description: error instanceof Error ? error.message : 'Unknown error',
+							},
+						],
+					};
+				}
+			},
+		},
+	};
+
 	description: INodeTypeDescription = {
 		displayName: 'Web Access',
 		name: 'webAccess',
@@ -844,7 +982,7 @@ export class WebAccess implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Cost-aware universal web access (HTTP, Puppeteer, Crawl4AI)',
+		description: 'Access websites to extract data, find contact info, download files, take screenshots, or run scripts. Use "Fetch Content" for single-page extraction, "Crawl" for multi-page discovery (emails, products), "Download Assets" for PDFs/images, "Screenshot" for visual capture, "Run Script" for custom browser automation.',
 		defaults: {
 			name: 'Web Access',
 		},
@@ -855,6 +993,16 @@ export class WebAccess implements INodeType {
 			{
 				name: 'webAccessApi',
 				required: false,
+			},
+			{
+				name: 'openAICompatibleApi',
+				required: false,
+				displayOptions: {
+					show: {
+						useAI: [true],
+						aiProvider: ['openai-compatible'],
+					},
+				},
 			},
 		],
 		properties: [
@@ -868,7 +1016,7 @@ export class WebAccess implements INodeType {
 				},
 				default: [],
 				required: true,
-				description: 'One or more URLs to process',
+				description: 'Website URL(s) to access. For Crawl operation, this is the starting point. Include https:// protocol.',
 			},
 			// Operation selection
 			{
@@ -880,32 +1028,32 @@ export class WebAccess implements INodeType {
 					{
 						name: 'Crawl',
 						value: 'crawl',
-						description: 'Crawl a website and extract information',
-						action: 'Crawl website starting from URL',
+						description: 'Discover and extract data from multiple pages. Best for: finding contact emails/phones across a website, listing products from e-commerce sites, exploring site structure. Automatically visits contact, about, and relevant pages.',
+						action: 'Crawl website to find emails phones or products',
 					},
 					{
 						name: 'Download Assets',
 						value: 'downloadAssets',
-						description: 'Download assets (PDFs, images, etc.) from the page',
-						action: 'Download assets from URL',
+						description: 'Download files from a webpage. Best for: getting PDFs, images, CSV files linked on a page. Returns files as binary data (single file or ZIP for multiple).',
+						action: 'Download pd fs images or other files from url',
 					},
 					{
 						name: 'Fetch Content',
 						value: 'fetchContent',
-						description: 'Fetch and extract content from a page',
-						action: 'Fetch content from URL',
+						description: 'Extract specific data from a single page. Best for: getting text content, extracting specific information, reading article content. Uses intelligent extraction based on your task.',
+						action: 'Extract content or data from a single URL',
 					},
 					{
 						name: 'Run Script',
 						value: 'runScript',
-						description: 'Run a custom JavaScript script on the page',
-						action: 'Run script on URL',
+						description: 'Execute custom JavaScript in the browser. Best for: complex interactions, clicking buttons, filling forms, extracting dynamic content that requires browser execution.',
+						action: 'Run custom java script on a webpage',
 					},
 					{
 						name: 'Screenshot',
 						value: 'screenshot',
-						description: 'Capture a screenshot of the page',
-						action: 'Capture screenshot of URL',
+						description: 'Capture a visual screenshot of the page. Best for: documenting page appearance, capturing charts/graphs, visual verification. Returns PNG image.',
+						action: 'Take a screenshot of a webpage',
 					},
 				],
 				default: 'fetchContent',
@@ -921,7 +1069,7 @@ export class WebAccess implements INodeType {
 				},
 				default: '',
 				required: true,
-				description: 'Natural-language instruction describing what to do with the URLs',
+				description: 'What to extract or do. Examples: "Find contact email", "Get all product names and prices", "Download PDF files", "Take full page screenshot", "Extract main article text".',
 				placeholder: 'e.g., "Find contact email" or "Download all PDFs"',
 			},
 			// useAI toggle
@@ -930,7 +1078,7 @@ export class WebAccess implements INodeType {
 				name: 'useAI',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to allow LLM-based extraction via Crawl4AI as a last resort',
+				description: 'Whether to allow LLM-based extraction as a last resort when other methods fail',
 			},
 			// AI Provider (shown when useAI is true)
 			{
@@ -941,10 +1089,12 @@ export class WebAccess implements INodeType {
 					{
 						name: 'Crawl4AI Internal',
 						value: 'crawl4ai',
+						description: 'Use the built-in LLM in Crawl4AI service',
 					},
 					{
-						name: 'OpenAI-Compatible (Future)',
+						name: 'OpenAI-Compatible',
 						value: 'openai-compatible',
+						description: 'Use OpenAI, OpenRouter, Groq, Together AI, or any OpenAI-compatible API',
 					},
 				],
 				default: 'crawl4ai',
@@ -953,21 +1103,39 @@ export class WebAccess implements INodeType {
 						useAI: [true],
 					},
 				},
-				description: 'AI provider for LLM extraction (informational only in v1)',
+				description: 'AI provider for LLM extraction',
 			},
-			// AI Model (shown when useAI is true)
+			// AI Model dropdown with dynamic list (shown when openai-compatible is selected)
 			{
-				displayName: 'AI Model',
+				displayName: 'Model',
 				name: 'aiModel',
-				type: 'string',
-				default: '',
-				placeholder: 'e.g., gpt-4-mini',
+				type: 'resourceLocator',
+				default: { mode: 'list', value: '' },
+				required: true,
 				displayOptions: {
 					show: {
 						useAI: [true],
+						aiProvider: ['openai-compatible'],
 					},
 				},
-				description: 'AI model to use (informational only in v1)',
+				modes: [
+					{
+						displayName: 'From List',
+						name: 'list',
+						type: 'list',
+						typeOptions: {
+							searchListMethod: 'listModels',
+							searchable: true,
+						},
+					},
+					{
+						displayName: 'ID',
+						name: 'id',
+						type: 'string',
+						placeholder: 'e.g., gpt-4o-mini',
+					},
+				],
+				description: 'The model to use for extraction. Select from list or enter model ID manually.',
 			},
 			// Crawl4AI Base URL
 			{
@@ -989,7 +1157,27 @@ export class WebAccess implements INodeType {
 		const crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
 		const useAI = this.getNodeParameter('useAI', 0) as boolean;
 		const aiProvider = useAI ? (this.getNodeParameter('aiProvider', 0) as string) : undefined;
-		const aiModel = useAI ? (this.getNodeParameter('aiModel', 0) as string) : undefined;
+
+		// Get AI model - handle both string and resourceLocator formats
+		let aiModel: string | undefined;
+		if (useAI && aiProvider === 'openai-compatible') {
+			const aiModelParam = this.getNodeParameter('aiModel', 0) as string | { value: string };
+			aiModel = typeof aiModelParam === 'string' ? aiModelParam : aiModelParam?.value;
+		}
+
+		// Get OpenAI credentials if using openai-compatible provider
+		let openAiConfig: { apiKey: string; baseUrl: string } | undefined;
+		if (useAI && aiProvider === 'openai-compatible') {
+			try {
+				const credentials = await this.getCredentials('openAICompatibleApi');
+				openAiConfig = {
+					apiKey: credentials.apiKey as string,
+					baseUrl: (credentials.baseUrl as string) || 'https://api.openai.com/v1',
+				};
+			} catch {
+				// Credentials not available
+			}
+		}
 
 		try {
 			for (let i = 0; i < items.length; i++) {
@@ -1010,6 +1198,7 @@ export class WebAccess implements INodeType {
 							aiProvider,
 							aiModel,
 							crawl4aiBaseUrl,
+							openAiConfig,
 						};
 
 						const result = await processUrl(context);

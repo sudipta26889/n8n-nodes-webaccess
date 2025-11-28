@@ -66,6 +66,12 @@ export interface WebAccessResultJson {
 	meta?: WebAccessMeta;
 }
 
+// OpenAI-compatible API configuration
+export interface OpenAIConfig {
+	apiKey: string;
+	baseUrl: string;
+}
+
 // Processing context passed to processUrl
 export interface ProcessUrlContext {
 	url: string;
@@ -75,6 +81,7 @@ export interface ProcessUrlContext {
 	aiProvider?: string;
 	aiModel?: string;
 	crawl4aiBaseUrl: string;
+	openAiConfig?: OpenAIConfig;
 }
 
 // Internal processing result (includes optional binary)
