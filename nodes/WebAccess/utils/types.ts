@@ -61,6 +61,9 @@ export interface WebAccessMeta {
 	originalOperation?: WebAccessOperation;
 	fallbackOperation?: WebAccessOperation;
 	detectedOperation?: WebAccessOperation;
+	// Cost tracking
+	llmApiCalls?: number; // Number of LLM API calls made
+	estimatedCost?: string; // Estimated cost in USD (e.g., "$0.012")
 }
 
 // Main output JSON structure

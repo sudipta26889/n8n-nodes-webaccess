@@ -14,12 +14,14 @@ import type { TaskIntent, WebAccessOperation, OpenAIConfig } from './types';
  * @param {string} task - Task description from user
  * @param {OpenAIConfig} openAiConfig - OpenAI-compatible API configuration
  * @param {string} model - Model to use for detection
+ * @param {number} [callCounter] - Optional counter to track API calls
  * @returns {Promise<WebAccessOperation>} Detected operation type
  */
 export async function inferOperationWithLLM(
 	task: string,
 	openAiConfig: OpenAIConfig,
 	model: string,
+	callCounter?: { count: number },
 ): Promise<WebAccessOperation> {
 	const systemPrompt = `You are a task classifier for a web access tool. Given a user's task description, classify it into ONE of these operations:
 
@@ -43,23 +45,28 @@ Examples:
 - "Extract the article text" → fetchContent
 - "What is on this page?" → fetchContent`;
 
-	try {
-		const response = await fetch(`${openAiConfig.baseUrl}/chat/completions`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${openAiConfig.apiKey}`,
-			},
-			body: JSON.stringify({
-				model,
-				messages: [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: task },
-				],
-				max_tokens: 20,
-				temperature: 0,
-			}),
-		});
+		try {
+			// Track API call
+			if (callCounter) {
+				callCounter.count += 1;
+			}
+
+			const response = await fetch(`${openAiConfig.baseUrl}/chat/completions`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${openAiConfig.apiKey}`,
+				},
+				body: JSON.stringify({
+					model,
+					messages: [
+						{ role: 'system', content: systemPrompt },
+						{ role: 'user', content: task },
+					],
+					max_tokens: 20,
+					temperature: 0,
+				}),
+			});
 
 		if (!response.ok) {
 			// Fall back to keyword matching
@@ -171,16 +178,18 @@ export function inferOperationKeyword(task: string): WebAccessOperation {
  * @param {string} task - Task description from user
  * @param {OpenAIConfig} [openAiConfig] - Optional OpenAI config for LLM detection
  * @param {string} [model] - Optional model name
+ * @param {number} [callCounter] - Optional counter to track API calls
  * @returns {Promise<WebAccessOperation>} Detected operation type
  */
 export async function inferOperation(
 	task: string,
 	openAiConfig?: OpenAIConfig,
 	model?: string,
+	callCounter?: { count: number },
 ): Promise<WebAccessOperation> {
 	// If LLM is available, use it for smarter detection
 	if (openAiConfig && model) {
-		return inferOperationWithLLM(task, openAiConfig, model);
+		return inferOperationWithLLM(task, openAiConfig, model, callCounter);
 	}
 
 	// Fall back to keyword matching
