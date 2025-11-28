@@ -1357,7 +1357,7 @@ export class WebAccess implements INodeType {
 				type: 'boolean',
 				default: false,
 				noDataExpression: true,
-				description: 'Enable LLM-based extraction when other methods fail. Requires AI Provider configuration.',
+				description: 'Whether to enable LLM-based extraction when other methods fail',
 			},
 			// AI Provider (shown when useAI is true)
 			{
@@ -1390,7 +1390,6 @@ export class WebAccess implements INodeType {
 				name: 'aiModel',
 				type: 'resourceLocator',
 				default: { mode: 'id', value: 'gpt-4o-mini' },
-				required: false,
 				displayOptions: {
 					show: {
 						useAI: [true],
@@ -1442,7 +1441,7 @@ export class WebAccess implements INodeType {
 		const returnItems: INodeExecutionData[] = [];
 
 		// Read global parameters
-		let crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
+		const crawl4aiBaseUrl = this.getNodeParameter('crawl4aiBaseUrl', 0) as string;
 		const flareSolverrUrl = (this.getNodeParameter('flareSolverrUrl', 0) as string) || undefined;
 		const useAI = this.getNodeParameter('useAI', 0) as boolean;
 		const aiProvider = useAI ? (this.getNodeParameter('aiProvider', 0) as string) : undefined;

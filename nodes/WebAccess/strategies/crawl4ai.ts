@@ -172,7 +172,6 @@ export async function crawl4aiCrawl(
 	// Extract seed domain for filtering
 	const seedHostname = getHostname(targetUrl);
 	if (!seedHostname) {
-		console.error('Invalid target URL for crawling');
 		return [];
 	}
 
@@ -212,7 +211,6 @@ export async function crawl4aiCrawl(
 		clearTimeout(timeoutId);
 
 		if (!response.ok) {
-			console.error(`Crawl4AI /crawl request failed: ${response.status}`);
 			return [];
 		}
 
@@ -317,10 +315,7 @@ export async function crawl4aiCrawl(
 		}
 
 		return pages;
-	} catch (error) {
-		if (error instanceof Error) {
-			console.error(`Crawl4AI crawl error: ${error.message}`);
-		}
+	} catch {
 		return [];
 	}
 }

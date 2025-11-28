@@ -67,9 +67,8 @@ export async function closeBrowser(): Promise<void> {
 	if (browserInstance) {
 		try {
 			await browserInstance.close();
-		} catch (error) {
+		} catch {
 			// Ignore errors during cleanup
-			console.error('Error closing browser:', error);
 		} finally {
 			browserInstance = null;
 		}
