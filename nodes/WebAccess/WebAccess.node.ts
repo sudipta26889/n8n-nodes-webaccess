@@ -33,6 +33,7 @@ import {
 	extractPageTitle,
 	extractProductsFromHtml,
 	extractAssetUrls,
+	getContactPageUrls,
 } from './utils/extraction';
 import {
 	inferTaskIntent,
@@ -428,6 +429,7 @@ async function handleDownloadAssets(
 
 /**
  * Crawl for contact information (emails/phones)
+ * Strategy: 1) Try common contact page URLs directly, 2) Try crawled candidates
  */
 async function crawlForContact(
 	baseUrl: string,
@@ -442,48 +444,114 @@ async function crawlForContact(
 	const allEmails: string[] = [];
 	const allPhones: string[] = [];
 	const pages: Array<{ url: string; emails?: string[]; phones?: string[] }> = [];
+	const pagesChecked: string[] = [];
 
-	for (const candidate of candidates) {
-		// Fetch each candidate page
-		const result = await handleFetchContent(
-			candidate.url,
-			subTask,
-			useAI,
-			crawl4aiBaseUrl,
-			{ ...meta },
-		);
+	// Helper to check if we've found what we need
+	const hasFoundWhatWeNeed = (): boolean => {
+		const emailSatisfied = !intent.wantsEmail || allEmails.length > 0;
+		const phoneSatisfied = !intent.wantsPhone || allPhones.length > 0;
+		return emailSatisfied && phoneSatisfied;
+	};
 
-		if (result.json.success && result.json.data) {
-			const pageData: { url: string; emails?: string[]; phones?: string[] } = {
-				url: candidate.url,
-			};
+	// STEP 1: Try common contact page URLs directly first (faster than crawling)
+	const contactUrls = getContactPageUrls(baseUrl);
+	for (const contactUrl of contactUrls) {
+		if (hasFoundWhatWeNeed()) break;
 
-			if (intent.wantsEmail && result.json.data.emails) {
-				const emails = result.json.data.emails as string[];
-				pageData.emails = emails;
-				allEmails.push(...emails);
+		pagesChecked.push(contactUrl);
+		try {
+			const result = await handleFetchContent(
+				contactUrl,
+				subTask,
+				useAI,
+				crawl4aiBaseUrl,
+				{ ...meta },
+			);
 
-				// Stop early if we found emails
-				if (allEmails.length > 0) {
+			if (result.json.success && result.json.data) {
+				const pageData: { url: string; emails?: string[]; phones?: string[] } = {
+					url: contactUrl,
+				};
+
+				if (intent.wantsEmail && result.json.data.emails) {
+					const emails = result.json.data.emails as string[];
+					if (emails.length > 0) {
+						pageData.emails = emails;
+						allEmails.push(...emails);
+					}
+				}
+
+				if (intent.wantsPhone && result.json.data.phones) {
+					const phones = result.json.data.phones as string[];
+					if (phones.length > 0) {
+						pageData.phones = phones;
+						allPhones.push(...phones);
+					}
+				}
+
+				if (pageData.emails || pageData.phones) {
 					pages.push(pageData);
-					break;
 				}
 			}
+		} catch {
+			// URL doesn't exist or failed, continue to next
+		}
+	}
 
-			if (intent.wantsPhone && result.json.data.phones) {
-				const phones = result.json.data.phones as string[];
-				pageData.phones = phones;
-				allPhones.push(...phones);
-			}
+	// STEP 2: If still need more data, try crawled candidates
+	if (!hasFoundWhatWeNeed()) {
+		for (const candidate of candidates) {
+			if (hasFoundWhatWeNeed()) break;
 
-			if (pageData.emails || pageData.phones) {
-				pages.push(pageData);
+			// Skip if we already checked this URL
+			if (pagesChecked.includes(candidate.url)) continue;
+			pagesChecked.push(candidate.url);
+
+			const result = await handleFetchContent(
+				candidate.url,
+				subTask,
+				useAI,
+				crawl4aiBaseUrl,
+				{ ...meta },
+			);
+
+			if (result.json.success && result.json.data) {
+				const pageData: { url: string; emails?: string[]; phones?: string[] } = {
+					url: candidate.url,
+				};
+
+				if (intent.wantsEmail && result.json.data.emails) {
+					const emails = result.json.data.emails as string[];
+					if (emails.length > 0) {
+						pageData.emails = emails;
+						allEmails.push(...emails);
+					}
+				}
+
+				if (intent.wantsPhone && result.json.data.phones) {
+					const phones = result.json.data.phones as string[];
+					if (phones.length > 0) {
+						pageData.phones = phones;
+						allPhones.push(...phones);
+					}
+				}
+
+				if (pageData.emails || pageData.phones) {
+					pages.push(pageData);
+				}
 			}
 		}
 	}
 
 	const uniqueEmails = [...new Set(allEmails)];
 	const uniquePhones = [...new Set(allPhones)];
+
+	// Add debug info to meta
+	const debugMeta = {
+		...meta,
+		pagesChecked: pagesChecked.length,
+		pagesWithData: pages.length,
+	};
 
 	if (uniqueEmails.length === 0 && uniquePhones.length === 0) {
 		return {
@@ -493,8 +561,8 @@ async function crawlForContact(
 				task,
 				success: false,
 				data: null,
-				error: 'No contact information found.',
-				meta,
+				error: `No contact information found. Checked ${pagesChecked.length} pages.`,
+				meta: debugMeta,
 			},
 		};
 	}
@@ -510,7 +578,7 @@ async function crawlForContact(
 			task,
 			success: true,
 			data,
-			meta,
+			meta: debugMeta,
 		},
 	};
 }
@@ -602,9 +670,42 @@ async function handleCrawl(
 	meta: WebAccessMeta,
 ): Promise<{ json: WebAccessResultJson }> {
 	const intent = inferTaskIntent(task, 'crawl');
-	meta.usedCrawl4ai = true;
+	const subTask = generateSubTask(task, intent);
 
-	// Crawl the site
+	// For contact extraction, try direct URLs first before crawling
+	// This is much faster and often sufficient
+	if (intent.wantsEmail || intent.wantsPhone) {
+		// First attempt: try common contact pages directly without crawling
+		const quickResult = await crawlForContact(url, task, subTask, [], useAI, crawl4aiBaseUrl, intent, { ...meta });
+
+		// If we found data, return early
+		if (quickResult.json.success) {
+			return quickResult;
+		}
+
+		// If direct URLs didn't work, now try crawling for more candidates
+		meta.usedCrawl4ai = true;
+		const crawledPages = await crawl4aiCrawl(crawl4aiBaseUrl, url);
+
+		if (crawledPages.length > 0) {
+			// Score and sort candidates
+			const scoredPages = crawledPages
+				.map((page) => ({
+					...page,
+					score: scoreUrlForIntent(page.url, intent),
+				}))
+				.sort((a, b) => b.score - a.score)
+				.slice(0, MAX_CRAWL_CANDIDATES);
+
+			return crawlForContact(url, task, subTask, scoredPages, useAI, crawl4aiBaseUrl, intent, meta);
+		}
+
+		// Crawl failed, return the quickResult (which has the error message)
+		return quickResult;
+	}
+
+	// For other operations, crawl first
+	meta.usedCrawl4ai = true;
 	const crawledPages = await crawl4aiCrawl(crawl4aiBaseUrl, url);
 
 	if (crawledPages.length === 0) {
@@ -629,14 +730,6 @@ async function handleCrawl(
 		}))
 		.sort((a, b) => b.score - a.score)
 		.slice(0, MAX_CRAWL_CANDIDATES);
-
-	// Generate sub-task
-	const subTask = generateSubTask(task, intent);
-
-	// Process based on intent
-	if (intent.wantsEmail || intent.wantsPhone) {
-		return crawlForContact(url, task, subTask, scoredPages, useAI, crawl4aiBaseUrl, intent, meta);
-	}
 
 	if (intent.wantsProductList) {
 		return crawlForProducts(url, task, scoredPages, meta);

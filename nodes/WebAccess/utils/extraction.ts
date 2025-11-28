@@ -36,35 +36,126 @@ const ASSET_EXTENSIONS: Record<AssetType, string[]> = {
 };
 
 /**
+ * Check if an email matches junk patterns
+ */
+function isJunkEmail(email: string): boolean {
+	for (const pattern of JUNK_EMAIL_PATTERNS) {
+		if (pattern.test(email)) return true;
+	}
+	return false;
+}
+
+/**
  * Extract email addresses from text or HTML content
- * Deduplicates and filters out obvious junk emails
+ * Handles obfuscated emails and deduplicates
  */
 export function extractEmails(textOrHtml: string): string[] {
 	if (!textOrHtml) return [];
 
-	const matches = textOrHtml.match(EMAIL_REGEX) || [];
+	const emails = new Set<string>();
 
-	// Also look for mailto: links
-	const mailtoMatches = textOrHtml.match(/mailto:([^"'\s<>]+)/gi) || [];
-	const mailtoEmails = mailtoMatches.map((m) => m.replace(/^mailto:/i, '').split('?')[0]);
+	// First, decode common obfuscation patterns
+	const decoded = textOrHtml
+		// HTML entities
+		.replace(/&#64;/g, '@')
+		.replace(/&#46;/g, '.')
+		.replace(/&commat;/g, '@')
+		.replace(/&period;/g, '.')
+		// Common text obfuscation
+		.replace(/\s*\[at\]\s*/gi, '@')
+		.replace(/\s*\(at\)\s*/gi, '@')
+		.replace(/\s*\{at\}\s*/gi, '@')
+		.replace(/\s*@\s*/g, '@') // spaces around @
+		.replace(/\s*\[dot\]\s*/gi, '.')
+		.replace(/\s*\(dot\)\s*/gi, '.')
+		.replace(/\s*\{dot\}\s*/gi, '.')
+		// Variations
+		.replace(/\s*\[AT\]\s*/g, '@')
+		.replace(/\s*\[DOT\]\s*/g, '.')
+		.replace(/\bat\b/gi, (match, offset, str) => {
+			// Only replace 'at' if it looks like email context
+			const before = str.substring(Math.max(0, offset - 20), offset);
+			const after = str.substring(offset + match.length, offset + match.length + 20);
+			if (/[a-z0-9]$/i.test(before) && /^[a-z0-9]/i.test(after)) {
+				return '@';
+			}
+			return match;
+		});
 
-	// Combine and deduplicate
-	const allEmails = [...matches, ...mailtoEmails];
-	const uniqueEmails = [...new Set(allEmails.map((e) => e.toLowerCase()))];
+	// Extract from mailto: links (highest quality)
+	const mailtoMatches = decoded.match(/mailto:([^"'\s<>?#]+)/gi) || [];
+	mailtoMatches.forEach((m) => {
+		const email = m.replace(/^mailto:/i, '').split('?')[0].split('#')[0];
+		if (email.includes('@') && email.includes('.') && !isJunkEmail(email)) {
+			emails.add(email.toLowerCase().trim());
+		}
+	});
 
-	// Filter out junk
-	return uniqueEmails.filter((email) => {
+	// Extract from href attributes containing email-like patterns
+	const hrefMatches = decoded.match(/href=["'][^"']*@[^"']*["']/gi) || [];
+	hrefMatches.forEach((m) => {
+		const emailMatch = m.match(EMAIL_REGEX);
+		if (emailMatch) {
+			emailMatch.forEach((email) => {
+				if (!isJunkEmail(email)) {
+					emails.add(email.toLowerCase().trim());
+				}
+			});
+		}
+	});
+
+	// Extract standard email patterns
+	const standardMatches = decoded.match(EMAIL_REGEX) || [];
+	standardMatches.forEach((email) => {
+		if (!isJunkEmail(email)) {
+			emails.add(email.toLowerCase().trim());
+		}
+	});
+
+	// Filter results
+	return Array.from(emails).filter((email) => {
 		// Basic validation
 		if (email.length < 5 || email.length > 254) return false;
 		if (!email.includes('@') || !email.includes('.')) return false;
-
-		// Check against junk patterns
-		for (const pattern of JUNK_EMAIL_PATTERNS) {
-			if (pattern.test(email)) return false;
-		}
-
+		// Must have valid TLD
+		const parts = email.split('.');
+		const tld = parts[parts.length - 1];
+		if (tld.length < 2 || tld.length > 10) return false;
 		return true;
 	});
+}
+
+/**
+ * Generate common contact page URLs for a website
+ */
+export function getContactPageUrls(baseUrl: string): string[] {
+	try {
+		const url = new URL(baseUrl);
+		const base = `${url.protocol}//${url.host}`;
+		return [
+			`${base}/contact`,
+			`${base}/contact-us`,
+			`${base}/contactus`,
+			`${base}/contact.html`,
+			`${base}/pages/contact`,
+			`${base}/pages/contact-us`,
+			`${base}/about`,
+			`${base}/about-us`,
+			`${base}/aboutus`,
+			`${base}/pages/about`,
+			`${base}/pages/about-us`,
+			`${base}/support`,
+			`${base}/help`,
+			`${base}/customer-service`,
+			`${base}/customer-care`,
+			`${base}/info`,
+			`${base}/information`,
+			`${base}/get-in-touch`,
+			`${base}/reach-us`,
+		];
+	} catch {
+		return [];
+	}
 }
 
 /**
