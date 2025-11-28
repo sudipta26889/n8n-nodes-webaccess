@@ -1,0 +1,59 @@
+{
+	"name": "n8n-nodes-webaccess",
+	"version": "1.4.2",
+	"description": "Cost-aware universal web access node for n8n (HTTP, Puppeteer, Crawl4AI)",
+	"license": "MIT",
+	"homepage": "https://github.com/sudipta26889/n8n-nodes-webaccess",
+	"keywords": [
+		"n8n-community-node-package",
+		"web-access",
+		"web-scraping",
+		"puppeteer",
+		"crawl4ai"
+	],
+	"author": {
+		"name": "Web Access Node Developer",
+		"email": "developer@example.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/sudipta26889/n8n-nodes-webaccess.git"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/OpenAICompatibleApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/WebAccess/WebAccess.node.js"
+		]
+	},
+	"dependencies": {
+		"cheerio": "^1.0.0-rc.12",
+		"jszip": "^3.10.1",
+		"puppeteer": "^21.0.0"
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "*",
+		"@types/jszip": "^3.4.1",
+		"eslint": "9.32.0",
+		"prettier": "3.6.2",
+		"release-it": "^19.0.4",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}

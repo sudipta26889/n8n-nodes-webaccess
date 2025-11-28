@@ -1350,15 +1350,14 @@ export class WebAccess implements INodeType {
 				description: 'What to extract or do. Examples: "Find contact email", "Get all product names and prices", "Download PDF files", "Take full page screenshot", "Extract main article text".',
 				placeholder: 'e.g., "Find contact email" or "Download all PDFs"',
 			},
-			// useAI toggle
+			// useAI toggle - Enable LLM-based extraction
 			{
-				displayName: 'Allow LLM (Advanced Extraction)',
+				displayName: 'Use LLM Extraction',
 				name: 'useAI',
 				type: 'boolean',
 				default: false,
-				required: false,
 				noDataExpression: true,
-				description: 'Whether to allow LLM-based extraction as a last resort when other methods fail',
+				description: 'Enable LLM-based extraction when other methods fail. Requires AI Provider configuration.',
 			},
 			// AI Provider (shown when useAI is true)
 			{
