@@ -123,15 +123,18 @@ export function generateSubTask(parentTask: string, intent: TaskIntent): string 
 }
 
 /**
- * Score a URL based on task intent for crawl candidate selection
+ * Score a crawled page based on task intent for candidate selection
+ * Combines URL, title, and snippet signals for better ranking
  * Higher score = more likely to be relevant
  */
-export function scoreUrlForIntent(url: string, intent: TaskIntent): number {
-	const lowerUrl = url.toLowerCase();
+export function scorePageForIntent(page: { url: string; title?: string; snippet?: string }, intent: TaskIntent): number {
+	const lowerUrl = page.url.toLowerCase();
+	const lowerTitle = (page.title || '').toLowerCase();
+	const lowerSnippet = (page.snippet || '').toLowerCase();
 	let score = 0;
 
 	if (intent.wantsEmail || intent.wantsPhone) {
-		// Contact-related URL patterns
+		// Contact-related patterns
 		const contactPatterns = [
 			'contact',
 			'contacts',
@@ -155,14 +158,23 @@ export function scoreUrlForIntent(url: string, intent: TaskIntent): number {
 		];
 
 		for (const pattern of contactPatterns) {
+			// URL match (strong signal)
 			if (lowerUrl.includes(pattern)) {
 				score += 10;
+			}
+			// Title match (medium signal)
+			if (lowerTitle.includes(pattern)) {
+				score += 7;
+			}
+			// Snippet match (weak signal)
+			if (lowerSnippet.includes(pattern)) {
+				score += 3;
 			}
 		}
 	}
 
 	if (intent.wantsProductList) {
-		// Product-related URL patterns
+		// Product-related patterns
 		const productPatterns = [
 			'product',
 			'products',
@@ -187,8 +199,17 @@ export function scoreUrlForIntent(url: string, intent: TaskIntent): number {
 		];
 
 		for (const pattern of productPatterns) {
+			// URL match (strong signal)
 			if (lowerUrl.includes(pattern)) {
 				score += 10;
+			}
+			// Title match (medium signal)
+			if (lowerTitle.includes(pattern)) {
+				score += 7;
+			}
+			// Snippet match (weak signal)
+			if (lowerSnippet.includes(pattern)) {
+				score += 3;
 			}
 		}
 	}
@@ -219,6 +240,15 @@ export function scoreUrlForIntent(url: string, intent: TaskIntent): number {
 	}
 
 	return score;
+}
+
+/**
+ * @deprecated Use scorePageForIntent instead
+ * Score a URL based on task intent for crawl candidate selection
+ * Higher score = more likely to be relevant
+ */
+export function scoreUrlForIntent(url: string, intent: TaskIntent): number {
+	return scorePageForIntent({ url }, intent);
 }
 
 /**

@@ -43,7 +43,7 @@ import {
 import {
 	inferTaskIntent,
 	generateSubTask,
-	scoreUrlForIntent,
+	scorePageForIntent,
 	wantsFullPageScreenshot,
 	getAssetTypeFromTask,
 } from './utils/taskIntent';
@@ -380,16 +380,20 @@ async function handleScreenshot(
 
 /**
  * Handle downloadAssets operation
+ * Supports multi-page crawling when assets aren't found on the initial page
  */
 async function handleDownloadAssets(
 	url: string,
 	task: string,
+	crawl4aiBaseUrl: string,
 	meta: WebAccessMeta,
 ): Promise<{ json: WebAccessResultJson; binary?: Record<string, IBinaryData> }> {
 	const assetType = getAssetTypeFromTask(task) || 'pdf';
+	const allAssetUrls: string[] = [];
+	const seenUrls = new Set<string>();
 	let html = '';
 
-	// Get page HTML via HTTP first
+	// STEP 1: Try the initial page
 	const httpResult = await httpFetch(url);
 	if (httpResult.success && httpResult.html) {
 		meta.usedHttp = true;
@@ -415,8 +419,57 @@ async function handleDownloadAssets(
 		}
 	}
 
-	// Extract asset URLs
-	const assetUrls = extractAssetUrls(html, url, assetType as AssetType).slice(0, MAX_ASSETS);
+	// Extract asset URLs from initial page
+	const initialAssets = extractAssetUrls(html, url, assetType as AssetType);
+	for (const assetUrl of initialAssets) {
+		if (!seenUrls.has(assetUrl)) {
+			seenUrls.add(assetUrl);
+			allAssetUrls.push(assetUrl);
+		}
+	}
+
+	// STEP 2: If no assets found on initial page, try crawling
+	if (allAssetUrls.length === 0) {
+		meta.usedCrawl4ai = true;
+		const crawledPages = await crawl4aiCrawl(crawl4aiBaseUrl, url);
+
+		// Check up to 10 crawled pages for assets
+		const pagesToCheck = crawledPages.slice(0, 10);
+
+		for (const page of pagesToCheck) {
+			let pageHtml = '';
+
+			// Fetch page content
+			const pageHttpResult = await httpFetch(page.url);
+			if (pageHttpResult.success && pageHttpResult.html) {
+				pageHtml = pageHttpResult.html;
+			} else {
+				try {
+					const pagePuppeteerResult = await getPageContent(page.url);
+					pageHtml = pagePuppeteerResult.html;
+				} catch {
+					continue;
+				}
+			}
+
+			// Extract assets from this page
+			const pageAssets = extractAssetUrls(pageHtml, page.url, assetType as AssetType);
+			for (const assetUrl of pageAssets) {
+				if (!seenUrls.has(assetUrl)) {
+					seenUrls.add(assetUrl);
+					allAssetUrls.push(assetUrl);
+
+					// Stop if we found enough assets
+					if (allAssetUrls.length >= MAX_ASSETS) break;
+				}
+			}
+
+			if (allAssetUrls.length >= MAX_ASSETS) break;
+		}
+	}
+
+	// Limit total assets
+	const assetUrls = allAssetUrls.slice(0, MAX_ASSETS);
 
 	if (assetUrls.length === 0) {
 		return {
@@ -426,7 +479,7 @@ async function handleDownloadAssets(
 				task,
 				success: false,
 				data: null,
-				error: `No ${assetType} assets found on the page.`,
+				error: `No ${assetType} assets found on the page or crawled pages.`,
 				meta,
 			},
 		};
@@ -689,43 +742,50 @@ async function crawlForContact(
 
 /**
  * Crawl for products
+ * Uses full pipeline (HTTP → Puppeteer → Crawl4AI BM25 → LLM) for each candidate page
  */
 async function crawlForProducts(
 	baseUrl: string,
 	task: string,
 	candidates: CrawledPage[],
+	useAI: boolean,
+	crawl4aiBaseUrl: string,
 	meta: WebAccessMeta,
+	aiProvider?: string,
+	aiModel?: string,
+	openAiConfig?: OpenAIConfig,
+	flareSolverrUrl?: string,
 ): Promise<{ json: WebAccessResultJson }> {
 	const allProducts: ProductSummary[] = [];
 	const sourcePages: string[] = [];
 	const seenUrls = new Set<string>();
 
 	for (const candidate of candidates) {
-		// Get page content
-		let html = '';
+		// Use full pipeline for each candidate page
+		const result = await handleFetchContent(
+			candidate.url,
+			task,
+			useAI,
+			crawl4aiBaseUrl,
+			{ ...meta },
+			aiProvider,
+			aiModel,
+			openAiConfig,
+			flareSolverrUrl,
+		);
 
-		const httpResult = await httpFetch(candidate.url);
-		if (httpResult.success && httpResult.html) {
-			html = httpResult.html;
-		} else {
-			try {
-				const puppeteerResult = await getPageContent(candidate.url);
-				html = puppeteerResult.html;
-			} catch {
-				continue;
-			}
-		}
+		// Extract products from successful result
+		if (result.json.success && result.json.data) {
+			const products = result.json.data.products as ProductSummary[] | undefined;
 
-		// Extract products
-		const products = extractProductsFromHtml(html, candidate.url);
+			if (products && products.length > 0) {
+				sourcePages.push(candidate.url);
 
-		if (products.length > 0) {
-			sourcePages.push(candidate.url);
-
-			for (const product of products) {
-				if (!seenUrls.has(product.url)) {
-					seenUrls.add(product.url);
-					allProducts.push(product);
+				for (const product of products) {
+					if (!seenUrls.has(product.url)) {
+						seenUrls.add(product.url);
+						allProducts.push(product);
+					}
 				}
 			}
 		}
@@ -799,11 +859,11 @@ async function handleCrawl(
 		const crawledPages = await crawl4aiCrawl(crawl4aiBaseUrl, url);
 
 		if (crawledPages.length > 0) {
-			// Score and sort candidates
+			// Score and sort candidates using URL, title, and snippet
 			const scoredPages = crawledPages
 				.map((page) => ({
 					...page,
-					score: scoreUrlForIntent(page.url, intent),
+					score: scorePageForIntent(page, intent),
 				}))
 				.sort((a, b) => b.score - a.score)
 				.slice(0, MAX_CRAWL_CANDIDATES);
@@ -836,17 +896,20 @@ async function handleCrawl(
 		};
 	}
 
-	// Score and sort candidates
+	// Score and sort candidates using URL, title, and snippet
 	const scoredPages = crawledPages
 		.map((page) => ({
 			...page,
-			score: scoreUrlForIntent(page.url, intent),
+			score: scorePageForIntent(page, intent),
 		}))
 		.sort((a, b) => b.score - a.score)
 		.slice(0, MAX_CRAWL_CANDIDATES);
 
 	if (intent.wantsProductList) {
-		return crawlForProducts(url, task, scoredPages, meta);
+		return crawlForProducts(
+			url, task, scoredPages, useAI, crawl4aiBaseUrl, meta,
+			aiProvider, aiModel, openAiConfig, flareSolverrUrl,
+		);
 	}
 
 	// Default: return crawled pages info
@@ -927,7 +990,7 @@ async function processUrl(
 			return handleScreenshot(url, task, meta);
 
 		case 'downloadAssets':
-			return handleDownloadAssets(url, task, meta);
+			return handleDownloadAssets(url, task, crawl4aiBaseUrl, meta);
 
 		case 'crawl':
 			return handleCrawl(url, task, useAI, crawl4aiBaseUrl, meta, aiProvider, aiModel, openAiConfig, flareSolverrUrl);
