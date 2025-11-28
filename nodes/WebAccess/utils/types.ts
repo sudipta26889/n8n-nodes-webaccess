@@ -54,6 +54,9 @@ export interface WebAccessMeta {
 	usedFlareSolverr?: boolean;
 	aiProvider?: string;
 	aiModel?: string;
+	llmError?: string;
+	pagesChecked?: number;
+	pagesWithData?: number;
 }
 
 // Main output JSON structure

@@ -283,6 +283,10 @@ async function handleFetchContent(
 					!!intent.wantsPhone,
 				);
 
+				if (contactResult.error) {
+					meta.llmError = contactResult.error;
+				}
+
 				if (contactResult.emails?.length || contactResult.phones?.length) {
 					const data: Record<string, unknown> = { pageTitle: extractPageTitle(html) };
 					if (contactResult.emails?.length) data.emails = contactResult.emails;
@@ -303,6 +307,9 @@ async function handleFetchContent(
 
 			// General extraction
 			const llmResult = await openaiExtract(openAiConfig, aiModel, contentForLlm, task);
+			if (llmResult.error) {
+				meta.llmError = llmResult.error;
+			}
 			if (llmResult.success && llmResult.text) {
 				return {
 					json: {
