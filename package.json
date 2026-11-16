@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-webaccess",
-	"version": "2.0.4",
+	"version": "2.0.5",
 	"description": "Cost-aware universal web access node for n8n (HTTP, Puppeteer, Crawl4AI)",
 	"license": "MIT",
 	"homepage": "https://github.com/sudipta26889/n8n-nodes-webaccess",
@@ -44,7 +44,7 @@
 	"dependencies": {
 		"cheerio": "^1.0.0-rc.12",
 		"jszip": "^3.10.1",
-		"puppeteer": "^21.0.0"
+		"puppeteer": "^25.17.0"
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",
